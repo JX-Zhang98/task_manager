@@ -15,7 +15,7 @@ from app.application.commands import (
 )
 from app.application.context import CommandContext
 from app.application.event_bus import EventBus
-from app.application.events import ReminderTriggered, TagChanged, TaskChanged
+from app.application.events import ReminderTriggered, TaskChanged
 from app.application.task_app import TITLE_MAX_LENGTH, TaskApplication
 from app.models.task import Task
 
@@ -61,17 +61,12 @@ def make_application(tasks=None, audit_log=None, tag_catalog=None):
     events = []
     event_bus.subscribe(TaskChanged, events.append)
     event_bus.subscribe(ReminderTriggered, events.append)
-    event_bus.subscribe(TagChanged, events.append)
     tag_repo = tag_catalog or InMemoryTagCatalogRepository()
     return TaskApplication(repository, event_bus, audit_log, tag_catalog_repository=tag_repo), repository, events
 
 
 def task_changed_events(events):
     return [event for event in events if isinstance(event, TaskChanged)]
-
-
-def tag_changed_events(events):
-    return [event for event in events if isinstance(event, TagChanged)]
 
 
 def test_task_application_dispatches_task_lifecycle_commands():
@@ -282,12 +277,9 @@ def test_task_application_renames_tag_across_tasks():
     catalog = app.tag_catalog_repository.load_catalog()
     assert any(t["name"] == "Deep Work" for t in catalog)
 
-    # Verify TagChanged event
-    tag_events = tag_changed_events(events)
-    assert len(tag_events) == 1
-    assert tag_events[0].action == "rename"
-    assert tag_events[0].tag_name == "Deep Work"
-    assert tag_events[0].affected_task_count == 2
+    # Verify TaskChanged event for rename_tag
+    tag_events = task_changed_events(events)
+    assert tag_events[-1].action == "rename_tag"
 
 
 def test_task_application_deletes_tag_from_all_tasks():
@@ -313,10 +305,9 @@ def test_task_application_deletes_tag_from_all_tasks():
     catalog = app.tag_catalog_repository.load_catalog()
     assert not any(t["name"].casefold() == "work" for t in catalog)
 
-    # Verify TagChanged event
-    tag_events = tag_changed_events(events)
-    assert len(tag_events) == 1
-    assert tag_events[0].action == "delete"
+    # Verify TaskChanged event for delete_tag
+    tag_events = task_changed_events(events)
+    assert tag_events[-1].action == "delete_tag"
 
 
 def test_task_application_merges_tag():
@@ -338,10 +329,9 @@ def test_task_application_merges_tag():
     assert tasks[0].tags == [{"name": "Home", "color": "#059669"}]
     assert tasks[1].tags == [{"name": "Home", "color": "#059669"}]
 
-    # Verify TagChanged event
-    tag_events = tag_changed_events(events)
-    assert len(tag_events) == 1
-    assert tag_events[0].action == "merge"
+    # Verify TaskChanged event for merge_tag
+    tag_events = task_changed_events(events)
+    assert tag_events[-1].action == "merge_tag"
 
 
 def test_task_application_prunes_stale_tags():
@@ -371,10 +361,9 @@ def test_task_application_prunes_stale_tags():
     old_task = app.get_task(old_task_result.task_id)
     assert old_task.tags == []
 
-    # Verify TagChanged event
-    tag_events = tag_changed_events(events)
-    assert len(tag_events) == 1
-    assert tag_events[0].action == "prune"
+    # Verify TaskChanged event for prune_stale_tags
+    tag_events = task_changed_events(events)
+    assert tag_events[-1].action == "prune_stale_tags"
 
 
 def test_task_application_tag_dry_run_previews_without_changing():
@@ -400,7 +389,8 @@ def test_task_application_tag_dry_run_previews_without_changing():
     # Verify no mutations
     task = list(app.tasks.values())[0]
     assert task.tags == [{"name": "Work", "color": "#2563EB"}]
-    assert tag_changed_events(events) == []
+    # Verify no events published in dry-run mode
+    assert task_changed_events(events) == []
 
 
 def test_task_application_tag_dry_run_rename_previews():

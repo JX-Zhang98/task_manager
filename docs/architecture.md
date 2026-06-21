@@ -86,12 +86,10 @@ CommandContext(
 ## 事件
 
 - `TaskChanged`
-  - 任务新增、更新、删除、移动、完成、重开或提醒状态更新时产生。
+  - 任务新增、更新、删除、移动、完成、重开、提醒状态更新、标签操作时产生。
+  - `action` 字段区分操作类型：`add`、`update`、`delete`、`move`、`complete`、`reopen`、`check_reminders`、`rename_tag`、`delete_tag`、`merge_tag`、`prune_stale_tags`。
 - `ReminderTriggered`
   - 到达提醒触发时间时产生。
-- `TagChanged`
-  - 标签重命名、删除、合并、清理时产生。
-  - 包含 `action`、`tag_name`、`affected_task_count`。
 
 `TaskService` 会订阅这些事件，并转换成现有 UI 使用的 `data_changed` 和 `reminder_triggered`。
 

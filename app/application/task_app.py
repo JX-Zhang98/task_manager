@@ -20,7 +20,7 @@ from app.application.commands import (
 )
 from app.application.context import CommandContext
 from app.application.event_bus import EventBus
-from app.application.events import ApplicationEvent, ReminderTriggered, TagChanged, TaskChanged
+from app.application.events import ApplicationEvent, ReminderTriggered, TaskChanged
 from app.application.results import CommandResult
 from app.application.serializers import (
     command_result_to_dict,
@@ -317,14 +317,13 @@ class TaskApplication:
         catalog.append({"name": new_name, "color": command.color})
         self._save_catalog(catalog)
 
-        event = TagChanged(action="rename", tag_name=new_name, affected_task_count=affected)
         self.repository.save_all(self.tasks)
         return CommandResult(
             ok=True,
             message="Tag renamed",
             changed=True,
             data={"affected_task_count": affected, "old_name": command.old_name, "new_name": new_name},
-            events=[TaskChanged(action="rename_tag"), event],
+            events=[TaskChanged(action="rename_tag")],
         )
 
     def _delete_tag(self, command: DeleteTag) -> CommandResult:
@@ -340,14 +339,13 @@ class TaskApplication:
         catalog = [t for t in catalog if t["name"].casefold() != key]
         self._save_catalog(catalog)
 
-        event = TagChanged(action="delete", tag_name=command.name, affected_task_count=affected)
         self.repository.save_all(self.tasks)
         return CommandResult(
             ok=True,
             message="Tag deleted",
             changed=True,
             data={"affected_task_count": affected, "deleted_tag": command.name},
-            events=[TaskChanged(action="delete_tag"), event],
+            events=[TaskChanged(action="delete_tag")],
         )
 
     def _merge_tag(self, command: MergeTag) -> CommandResult:
@@ -376,14 +374,13 @@ class TaskApplication:
         catalog.append({"name": target_name, "color": command.target_color})
         self._save_catalog(catalog)
 
-        event = TagChanged(action="merge", tag_name=target_name, affected_task_count=affected)
         self.repository.save_all(self.tasks)
         return CommandResult(
             ok=True,
             message="Tag merged",
             changed=True,
             data={"affected_task_count": affected, "source_name": command.source_name, "target_name": target_name},
-            events=[TaskChanged(action="merge_tag"), event],
+            events=[TaskChanged(action="merge_tag")],
         )
 
     def _prune_stale_tags(self, command: PruneStaleTags) -> CommandResult:
@@ -414,14 +411,13 @@ class TaskApplication:
         self._save_catalog(kept)
 
         stale_count = len(stale)
-        event = TagChanged(action="prune", affected_task_count=affected)
         self.repository.save_all(self.tasks)
         return CommandResult(
             ok=True,
             message=f"Pruned {stale_count} stale tags",
             changed=stale_count > 0,
             data={"stale_count": stale_count, "stale_tags": stale, "affected_task_count": affected},
-            events=[TaskChanged(action="prune_stale_tags"), event],
+            events=[TaskChanged(action="prune_stale_tags")],
         )
 
     # ── Tag query methods ─────────────────────────────────────────

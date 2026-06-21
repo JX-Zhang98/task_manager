@@ -20,7 +20,7 @@ from app.application.commands import (
 )
 from app.application.context import CommandContext
 from app.application.event_bus import EventBus
-from app.application.events import ReminderTriggered, TagChanged, TaskChanged
+from app.application.events import ReminderTriggered, TaskChanged
 from app.application.task_app import TaskApplication
 from app.config import DATA_DIR
 from app.infrastructure.audit_log import JsonlAuditLog
@@ -43,7 +43,6 @@ class TaskService(QObject):
         self.event_bus = EventBus()
         self.event_bus.subscribe(TaskChanged, self._handle_task_changed)
         self.event_bus.subscribe(ReminderTriggered, self._handle_reminder_triggered)
-        self.event_bus.subscribe(TagChanged, self._handle_tag_changed)
         self.application = TaskApplication(
             self.repository, self.event_bus, self.audit_log,
             tag_catalog_repository=self.tag_catalog_repo,
@@ -188,6 +187,3 @@ class TaskService(QObject):
 
     def _handle_reminder_triggered(self, event) -> None:
         self.reminder_triggered.emit(event.title, event.task_id)
-
-    def _handle_tag_changed(self, event) -> None:
-        self.data_changed.emit()
