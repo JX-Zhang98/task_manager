@@ -5,7 +5,9 @@ from app.domain.task_rules import (
     VALID_QUADRANTS,
     archived_tasks,
     is_valid_quadrant,
+    normalize_tags,
     should_trigger_reminder,
+    task_sort_key,
     visible_inbox_tasks,
     visible_matrix_tasks,
 )
@@ -21,6 +23,7 @@ def make_task(
     completed_at=None,
     reminder_minutes=None,
     reminder_sent=False,
+    sort_order=0,
 ):
     return Task(
         id=task_id,
@@ -32,6 +35,7 @@ def make_task(
         completed_at=completed_at,
         reminder_minutes=reminder_minutes,
         reminder_sent=reminder_sent,
+        sort_order=sort_order,
     )
 
 
@@ -99,3 +103,44 @@ def test_quadrant_definitions_are_domain_only():
     assert VALID_QUADRANTS == ("inbox", "q1", "q2", "q3", "q4")
     assert is_valid_quadrant("q1")
     assert not is_valid_quadrant("bad")
+
+
+def test_task_sort_key_prioritizes_sort_order_over_due_date():
+    """sort_order is the primary ordering key (after completion); due_date is only a tiebreaker."""
+    early_due = make_task("early_due", sort_order=2000, due_date="2026-06-08T09:00:00")
+    late_due = make_task("late_due", sort_order=1000, due_date="2026-06-10T09:00:00")
+    no_due = make_task("no_due", sort_order=1500)
+
+    result = sorted([early_due, late_due, no_due], key=task_sort_key)
+
+    # sort_order=1000 first (regardless of its late due_date),
+    # then sort_order=1500 (regardless of no due_date),
+    # then sort_order=2000
+    assert [task.id for task in result] == ["late_due", "no_due", "early_due"]
+
+
+def test_task_sort_key_due_date_tiebreaker():
+    """When sort_order is equal, due_date presence and value determine order."""
+    with_due = make_task("with_due", sort_order=1000, due_date="2026-06-08T09:00:00")
+    without_due = make_task("without_due", sort_order=1000)
+
+    result = sorted([without_due, with_due], key=task_sort_key)
+
+    # Tasks with due_date sort before those without, at the same sort_order
+    assert [task.id for task in result] == ["with_due", "without_due"]
+
+
+def test_normalize_tags_handles_various_inputs():
+    assert normalize_tags(None) == []
+    assert normalize_tags([]) == []
+    assert normalize_tags(["Work", "  Home  "]) == [
+        {"name": "Home", "color": "#6B7280"},
+        {"name": "Work", "color": "#6B7280"},
+    ]
+    assert normalize_tags([{"name": "Work", "color": "#2563EB"}, {"name": "work", "color": "#059669"}]) == [
+        {"name": "Work", "color": "#2563EB"},  # first occurrence wins
+    ]
+    assert normalize_tags([{"name": "", "color": "#2563EB"}]) == []
+    assert normalize_tags([{"name": "  Tag  ", "color": ""}]) == [
+        {"name": "Tag", "color": "#6B7280"},
+    ]

@@ -4,14 +4,18 @@ from app.application.commands import (
     AddTask,
     CheckReminders,
     CompleteTask,
+    DeleteTag,
     DeleteTask,
+    MergeTag,
     MoveTask,
+    PruneStaleTags,
+    RenameTag,
     ReopenTask,
     UpdateTask,
 )
 from app.application.context import CommandContext
 from app.application.event_bus import EventBus
-from app.application.events import ReminderTriggered, TaskChanged
+from app.application.events import ReminderTriggered, TagChanged, TaskChanged
 from app.application.task_app import TITLE_MAX_LENGTH, TaskApplication
 from app.models.task import Task
 
@@ -30,6 +34,19 @@ class InMemoryTaskRepository:
         self.save_count += 1
 
 
+class InMemoryTagCatalogRepository:
+    def __init__(self):
+        self.catalog: list[dict[str, str]] = []
+        self.save_count = 0
+
+    def load_catalog(self):
+        return list(self.catalog)
+
+    def save_catalog(self, tags):
+        self.catalog = list(tags)
+        self.save_count += 1
+
+
 class InMemoryAuditLog:
     def __init__(self):
         self.records = []
@@ -38,17 +55,23 @@ class InMemoryAuditLog:
         self.records.append(record)
 
 
-def make_application(tasks=None, audit_log=None):
+def make_application(tasks=None, audit_log=None, tag_catalog=None):
     repository = InMemoryTaskRepository(tasks)
     event_bus = EventBus()
     events = []
     event_bus.subscribe(TaskChanged, events.append)
     event_bus.subscribe(ReminderTriggered, events.append)
-    return TaskApplication(repository, event_bus, audit_log), repository, events
+    event_bus.subscribe(TagChanged, events.append)
+    tag_repo = tag_catalog or InMemoryTagCatalogRepository()
+    return TaskApplication(repository, event_bus, audit_log, tag_catalog_repository=tag_repo), repository, events
 
 
 def task_changed_events(events):
     return [event for event in events if isinstance(event, TaskChanged)]
+
+
+def tag_changed_events(events):
+    return [event for event in events if isinstance(event, TagChanged)]
 
 
 def test_task_application_dispatches_task_lifecycle_commands():
@@ -228,3 +251,296 @@ def test_task_application_rejects_future_ai_delete_without_dry_run():
     assert repository.save_count == 0
     assert events == []
     assert audit_log.records[0]["ok"] is False
+
+
+# ── Tag command tests ──────────────────────────────────────────────
+
+
+def test_task_application_renames_tag_across_tasks():
+    app, repository, events = make_application()
+
+    work = {"name": "Work", "color": "#2563EB"}
+    home = {"name": "Home", "color": "#059669"}
+    app.dispatch(AddTask(title="First", tags=[work]))
+    app.dispatch(AddTask(title="Second", tags=[work, home]))
+
+    result = app.dispatch(RenameTag(old_name="Work", new_name="Deep Work", color="#7C3AED"))
+
+    assert result.ok
+    assert result.changed
+    assert result.data["affected_task_count"] == 2
+
+    # Verify tasks updated
+    tasks = list(app.tasks.values())
+    first_tags = tasks[0].tags
+    second_tags = tasks[1].tags
+    assert first_tags == [{"name": "Deep Work", "color": "#7C3AED"}]
+    assert {"name": "Deep Work", "color": "#7C3AED"} in second_tags
+    assert {"name": "Home", "color": "#059669"} in second_tags
+
+    # Verify catalog updated
+    catalog = app.tag_catalog_repository.load_catalog()
+    assert any(t["name"] == "Deep Work" for t in catalog)
+
+    # Verify TagChanged event
+    tag_events = tag_changed_events(events)
+    assert len(tag_events) == 1
+    assert tag_events[0].action == "rename"
+    assert tag_events[0].tag_name == "Deep Work"
+    assert tag_events[0].affected_task_count == 2
+
+
+def test_task_application_deletes_tag_from_all_tasks():
+    app, repository, events = make_application()
+
+    work = {"name": "Work", "color": "#2563EB"}
+    home = {"name": "Home", "color": "#059669"}
+    app.dispatch(AddTask(title="First", tags=[work]))
+    app.dispatch(AddTask(title="Second", tags=[work, home]))
+
+    result = app.dispatch(DeleteTag(name="Work"))
+
+    assert result.ok
+    assert result.changed
+    assert result.data["affected_task_count"] == 2
+
+    # Verify tag removed from tasks
+    tasks = list(app.tasks.values())
+    assert tasks[0].tags == []
+    assert tasks[1].tags == [{"name": "Home", "color": "#059669"}]
+
+    # Verify catalog updated
+    catalog = app.tag_catalog_repository.load_catalog()
+    assert not any(t["name"].casefold() == "work" for t in catalog)
+
+    # Verify TagChanged event
+    tag_events = tag_changed_events(events)
+    assert len(tag_events) == 1
+    assert tag_events[0].action == "delete"
+
+
+def test_task_application_merges_tag():
+    app, repository, events = make_application()
+
+    work = {"name": "Work", "color": "#2563EB"}
+    home = {"name": "Home", "color": "#059669"}
+    app.dispatch(AddTask(title="First", tags=[work]))
+    app.dispatch(AddTask(title="Second", tags=[work, home]))
+
+    result = app.dispatch(MergeTag(source_name="Work", target_name="Home", target_color="#059669"))
+
+    assert result.ok
+    assert result.changed
+    assert result.data["affected_task_count"] == 2
+
+    # Verify source replaced by target, no duplicates
+    tasks = list(app.tasks.values())
+    assert tasks[0].tags == [{"name": "Home", "color": "#059669"}]
+    assert tasks[1].tags == [{"name": "Home", "color": "#059669"}]
+
+    # Verify TagChanged event
+    tag_events = tag_changed_events(events)
+    assert len(tag_events) == 1
+    assert tag_events[0].action == "merge"
+
+
+def test_task_application_prunes_stale_tags():
+    app, repository, events = make_application()
+
+    active = {"name": "Active", "color": "#2563EB"}
+    recent = {"name": "Recent", "color": "#059669"}
+    old = {"name": "Old", "color": "#D97706"}
+    app.dispatch(AddTask(title="Active", tags=[active]))
+    recent_task_result = app.dispatch(AddTask(title="Recent done", tags=[recent]))
+    old_task_result = app.dispatch(AddTask(title="Old done", tags=[old]))
+
+    # Complete recent and old tasks
+    app.dispatch(CompleteTask(task_id=recent_task_result.task_id, completed_at=datetime.now().isoformat(timespec="seconds")))
+    app.dispatch(CompleteTask(task_id=old_task_result.task_id, completed_at="2000-01-01T10:00:00"))
+
+    # Clear events from prior dispatches
+    events.clear()
+
+    result = app.dispatch(PruneStaleTags(cutoff_days=90))
+
+    assert result.ok
+    assert result.changed
+    assert result.data["stale_count"] == 1
+
+    # Verify old tag removed from its task
+    old_task = app.get_task(old_task_result.task_id)
+    assert old_task.tags == []
+
+    # Verify TagChanged event
+    tag_events = tag_changed_events(events)
+    assert len(tag_events) == 1
+    assert tag_events[0].action == "prune"
+
+
+def test_task_application_tag_dry_run_previews_without_changing():
+    app, repository, events = make_application()
+
+    work = {"name": "Work", "color": "#2563EB"}
+    app.dispatch(AddTask(title="First", tags=[work]))
+
+    # Clear events from prior dispatches
+    events.clear()
+
+    result = app.dispatch(
+        DeleteTag(name="Work"),
+        context=CommandContext(dry_run=True),
+    )
+
+    assert result.ok
+    assert not result.changed
+    assert result.would_change
+    assert result.preview["operation"] == "delete_tag"
+    assert result.preview["affected_task_count"] == 1
+
+    # Verify no mutations
+    task = list(app.tasks.values())[0]
+    assert task.tags == [{"name": "Work", "color": "#2563EB"}]
+    assert tag_changed_events(events) == []
+
+
+def test_task_application_tag_dry_run_rename_previews():
+    app, repository, events = make_application()
+
+    work = {"name": "Work", "color": "#2563EB"}
+    app.dispatch(AddTask(title="First", tags=[work]))
+
+    events.clear()
+
+    result = app.dispatch(
+        RenameTag(old_name="Work", new_name="Deep Work", color="#7C3AED"),
+        context=CommandContext(dry_run=True),
+    )
+
+    assert result.ok
+    assert not result.changed
+    assert result.would_change
+    assert result.preview["operation"] == "rename_tag"
+    assert result.preview["affected_task_count"] == 1
+
+
+def test_task_application_tag_dry_run_prune_previews():
+    app, repository, events = make_application()
+
+    active = {"name": "Active", "color": "#2563EB"}
+    app.dispatch(AddTask(title="Active", tags=[active]))
+
+    events.clear()
+
+    result = app.dispatch(
+        PruneStaleTags(cutoff_days=90),
+        context=CommandContext(dry_run=True),
+    )
+
+    assert result.ok
+    assert not result.changed
+    assert result.preview["operation"] == "prune_stale_tags"
+
+
+def test_task_application_rejects_future_ai_tag_delete_without_dry_run():
+    app, repository, events = make_application()
+    app.dispatch(AddTask(title="Task", tags=[{"name": "Work", "color": "#2563EB"}]))
+
+    events.clear()
+
+    result = app.dispatch(
+        DeleteTag(name="Work"),
+        context=CommandContext(source="future_ai"),
+    )
+
+    assert not result.ok
+    assert result.message == "future_ai delete requires dry-run"
+
+
+def test_task_application_tag_audit_logging():
+    audit_log = InMemoryAuditLog()
+    app, repository, events = make_application(audit_log=audit_log)
+
+    app.dispatch(AddTask(title="Task", tags=[{"name": "Work", "color": "#2563EB"}]))
+    app.dispatch(DeleteTag(name="Work"))
+
+    # Verify audit records include tag commands
+    assert audit_log.records[-1]["command"] == "DeleteTag"
+    assert audit_log.records[-1]["ok"] is True
+    assert audit_log.records[-1]["changed"] is True
+
+
+def test_task_application_get_all_tags():
+    app, repository, events = make_application()
+
+    work = {"name": "Work", "color": "#2563EB"}
+    home = {"name": "Home", "color": "#059669"}
+    app.dispatch(AddTask(title="First", tags=[work]))
+    app.dispatch(AddTask(title="Second", tags=[work, home]))
+
+    all_tags = app.get_all_tags()
+
+    tag_names = [t["name"] for t in all_tags]
+    assert "Work" in tag_names
+    assert "Home" in tag_names
+
+
+def test_task_application_get_tag_reference_counts():
+    app, repository, events = make_application()
+
+    work = {"name": "Work", "color": "#2563EB"}
+    home = {"name": "Home", "color": "#059669"}
+    app.dispatch(AddTask(title="First", tags=[work]))
+    app.dispatch(AddTask(title="Second", tags=[work, home]))
+
+    counts = app.get_tag_reference_counts()
+
+    assert counts["work"] == 2
+    assert counts["home"] == 1
+
+
+def test_task_application_merge_tag_same_source_and_target():
+    app, repository, events = make_application()
+
+    result = app.dispatch(MergeTag(source_name="Work", target_name="Work", target_color="#6B7280"))
+
+    assert result.ok
+    assert not result.changed
+    assert result.message == "Source and target are the same tag"
+
+
+def test_task_application_rename_tag_empty_new_name():
+    app, repository, events = make_application()
+
+    result = app.dispatch(RenameTag(old_name="Work", new_name="   ", color="#6B7280"))
+
+    assert not result.ok
+    assert result.message == "Tag name is required"
+
+
+def test_task_application_add_task_syncs_catalog():
+    tag_repo = InMemoryTagCatalogRepository()
+    app, repository, events = make_application(tag_catalog=tag_repo)
+
+    app.dispatch(AddTask(title="Task", tags=[{"name": "NewTag", "color": "#2563EB"}]))
+
+    catalog = tag_repo.load_catalog()
+    assert any(t["name"] == "NewTag" for t in catalog)
+
+
+def test_task_application_update_task_syncs_catalog():
+    tag_repo = InMemoryTagCatalogRepository()
+    app, repository, events = make_application(tag_catalog=tag_repo)
+
+    add_result = app.dispatch(AddTask(title="Task"))
+    app.dispatch(UpdateTask(
+        task_id=add_result.task_id,
+        title="Task",
+        description="",
+        due_date=None,
+        has_time=False,
+        reminder_minutes=None,
+        tags=[{"name": "NewLabel", "color": "#059669"}],
+    ))
+
+    catalog = tag_repo.load_catalog()
+    assert any(t["name"] == "NewLabel" for t in catalog)

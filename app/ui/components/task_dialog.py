@@ -614,19 +614,8 @@ class TaskDialog(QDialog):
         return TAG_COLORS[len(names) % len(TAG_COLORS)]
 
     def _normalize_tags(self, tags: list[dict[str, str]]) -> list[dict[str, str]]:
-        normalized = []
-        seen = set()
-        for tag in tags:
-            if not isinstance(tag, dict):
-                continue
-            name = str(tag.get("name", "")).strip()
-            color = str(tag.get("color", "#6B7280")).strip() or "#6B7280"
-            key = name.casefold()
-            if not name or key in seen:
-                continue
-            seen.add(key)
-            normalized.append({"name": name, "color": color})
-        return normalized
+        from app.domain.task_rules import normalize_tags
+        return normalize_tags(tags)
 
     def _make_tag_button(self, tag: dict[str, str], handler) -> QPushButton:
         display_name = self._tag_display_name(tag["name"])

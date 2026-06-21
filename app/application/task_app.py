@@ -1,22 +1,26 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from app.application.commands import (
     AddTask,
     CheckReminders,
     CompleteTask,
+    DeleteTag,
     DeleteTask,
+    MergeTag,
     MoveTask,
+    PruneStaleTags,
+    RenameTag,
     ReopenTask,
     TaskCommand,
     UpdateTask,
 )
 from app.application.context import CommandContext
 from app.application.event_bus import EventBus
-from app.application.events import ApplicationEvent, ReminderTriggered, TaskChanged
+from app.application.events import ApplicationEvent, ReminderTriggered, TagChanged, TaskChanged
 from app.application.results import CommandResult
 from app.application.serializers import (
     command_result_to_dict,
@@ -32,6 +36,7 @@ from app.domain.task_rules import (
     visible_inbox_tasks,
     visible_matrix_tasks,
 )
+from app.infrastructure.tag_catalog_repository import TagCatalogRepository
 from app.infrastructure.task_repository import TaskRepository
 from app.models.task import Task
 
@@ -47,10 +52,12 @@ class TaskApplication:
         repository: TaskRepository,
         event_bus: EventBus | None = None,
         audit_log=None,
+        tag_catalog_repository: TagCatalogRepository | None = None,
     ):
         self.repository = repository
         self.event_bus = event_bus or EventBus()
         self.audit_log = audit_log
+        self.tag_catalog_repository = tag_catalog_repository
         self.tasks = self.repository.load_all()
         self.normalize_sort_orders()
 
@@ -94,6 +101,14 @@ class TaskApplication:
             return self._reopen_task(command)
         if isinstance(command, CheckReminders):
             return self._check_reminders(command)
+        if isinstance(command, RenameTag):
+            return self._rename_tag(command)
+        if isinstance(command, DeleteTag):
+            return self._delete_tag(command)
+        if isinstance(command, MergeTag):
+            return self._merge_tag(command)
+        if isinstance(command, PruneStaleTags):
+            return self._prune_stale_tags(command)
         return CommandResult(ok=False, message=f"Unsupported command: {type(command).__name__}")
 
     def reload(self) -> None:
@@ -139,6 +154,8 @@ class TaskApplication:
         )
         task.sort_order = self.next_sort_order(command.quadrant)
         self.tasks[task.id] = task
+        if task.tags:
+            self._sync_tag_catalog(task.tags)
         return self._changed_result("add", task.id, "Task added", {"task": asdict(task)})
 
     def _update_task(self, command: UpdateTask) -> CommandResult:
@@ -170,6 +187,8 @@ class TaskApplication:
         task.reminder_minutes = command.reminder_minutes
         if command.tags is not None:
             task.tags = self._normalize_tags(command.tags)
+            if task.tags:
+                self._sync_tag_catalog(task.tags)
         if reminder_changed:
             task.reminder_sent = False
 
@@ -262,6 +281,205 @@ class TaskApplication:
             events=events,
         )
 
+    # ── Tag handlers ──────────────────────────────────────────────
+
+    def _rename_tag(self, command: RenameTag) -> CommandResult:
+        old_key = command.old_name.casefold()
+        new_name = command.new_name.strip()
+        if not new_name:
+            return CommandResult(ok=False, message="Tag name is required")
+        new_key = new_name.casefold()
+
+        affected = 0
+        for task in self.tasks.values():
+            updated: list[dict[str, str]] = []
+            has_new = False
+            changed = False
+            for tag in task.tags:
+                tag_key = tag.get("name", "").casefold()
+                if tag_key == new_key and tag_key != old_key:
+                    has_new = True
+                    updated.append({"name": new_name, "color": command.color})
+                elif tag_key == old_key:
+                    changed = True
+                    if not has_new:
+                        updated.append({"name": new_name, "color": command.color})
+                        has_new = True
+                else:
+                    updated.append(tag)
+            if changed:
+                task.tags = self._normalize_tags(updated)
+                affected += 1
+
+        # Update catalog: remove old + new, add renamed tag
+        catalog = self._load_catalog()
+        catalog = [t for t in catalog if t["name"].casefold() not in {old_key, new_key}]
+        catalog.append({"name": new_name, "color": command.color})
+        self._save_catalog(catalog)
+
+        event = TagChanged(action="rename", tag_name=new_name, affected_task_count=affected)
+        self.repository.save_all(self.tasks)
+        return CommandResult(
+            ok=True,
+            message="Tag renamed",
+            changed=True,
+            data={"affected_task_count": affected, "old_name": command.old_name, "new_name": new_name},
+            events=[TaskChanged(action="rename_tag"), event],
+        )
+
+    def _delete_tag(self, command: DeleteTag) -> CommandResult:
+        key = command.name.casefold()
+        affected = 0
+        for task in self.tasks.values():
+            before_count = len(task.tags)
+            task.tags = [tag for tag in task.tags if tag.get("name", "").casefold() != key]
+            if len(task.tags) < before_count:
+                affected += 1
+
+        catalog = self._load_catalog()
+        catalog = [t for t in catalog if t["name"].casefold() != key]
+        self._save_catalog(catalog)
+
+        event = TagChanged(action="delete", tag_name=command.name, affected_task_count=affected)
+        self.repository.save_all(self.tasks)
+        return CommandResult(
+            ok=True,
+            message="Tag deleted",
+            changed=True,
+            data={"affected_task_count": affected, "deleted_tag": command.name},
+            events=[TaskChanged(action="delete_tag"), event],
+        )
+
+    def _merge_tag(self, command: MergeTag) -> CommandResult:
+        source_key = command.source_name.casefold()
+        target_name = command.target_name.strip()
+        target_key = target_name.casefold()
+        if not target_name:
+            return CommandResult(ok=False, message="Target tag name is required")
+        if source_key == target_key:
+            return CommandResult(ok=True, message="Source and target are the same tag")
+
+        affected = 0
+        for task in self.tasks.values():
+            has_source = any(tag.get("name", "").casefold() == source_key for tag in task.tags)
+            if not has_source:
+                continue
+            has_target = any(tag.get("name", "").casefold() == target_key for tag in task.tags)
+            task.tags = [tag for tag in task.tags if tag.get("name", "").casefold() != source_key]
+            if not has_target:
+                task.tags.append({"name": target_name, "color": command.target_color})
+            task.tags = self._normalize_tags(task.tags)
+            affected += 1
+
+        catalog = self._load_catalog()
+        catalog = [t for t in catalog if t["name"].casefold() not in {source_key, target_key}]
+        catalog.append({"name": target_name, "color": command.target_color})
+        self._save_catalog(catalog)
+
+        event = TagChanged(action="merge", tag_name=target_name, affected_task_count=affected)
+        self.repository.save_all(self.tasks)
+        return CommandResult(
+            ok=True,
+            message="Tag merged",
+            changed=True,
+            data={"affected_task_count": affected, "source_name": command.source_name, "target_name": target_name},
+            events=[TaskChanged(action="merge_tag"), event],
+        )
+
+    def _prune_stale_tags(self, command: PruneStaleTags) -> CommandResult:
+        cutoff = datetime.now() - timedelta(days=command.cutoff_days)
+        referenced_keys: set[str] = set()
+        for task in self.tasks.values():
+            if task.completed:
+                completed_at = parse_datetime(task.completed_at)
+                if completed_at is None or completed_at < cutoff:
+                    continue
+            for tag in task.tags:
+                name = tag.get("name", "").strip()
+                if name:
+                    referenced_keys.add(name.casefold())
+
+        catalog = self._load_catalog()
+        stale = [t for t in catalog if t["name"].casefold() not in referenced_keys]
+        stale_keys = {t["name"].casefold() for t in stale}
+
+        affected = 0
+        for task in self.tasks.values():
+            before_count = len(task.tags)
+            task.tags = [tag for tag in task.tags if tag.get("name", "").casefold() not in stale_keys]
+            if len(task.tags) < before_count:
+                affected += 1
+
+        kept = [t for t in catalog if t["name"].casefold() in referenced_keys]
+        self._save_catalog(kept)
+
+        stale_count = len(stale)
+        event = TagChanged(action="prune", affected_task_count=affected)
+        self.repository.save_all(self.tasks)
+        return CommandResult(
+            ok=True,
+            message=f"Pruned {stale_count} stale tags",
+            changed=stale_count > 0,
+            data={"stale_count": stale_count, "stale_tags": stale, "affected_task_count": affected},
+            events=[TaskChanged(action="prune_stale_tags"), event],
+        )
+
+    # ── Tag query methods ─────────────────────────────────────────
+
+    def get_all_tags(self) -> list[dict[str, str]]:
+        """Merge catalog tags + inline task tags, deduped by casefold key."""
+        from app.domain.task_rules import normalize_tags
+        tags_by_name: dict[str, dict[str, str]] = {}
+        for tag in self._load_catalog():
+            tags_by_name[tag["name"].casefold()] = tag
+        for task in self.tasks.values():
+            for tag in task.tags:
+                name = tag.get("name", "").strip()
+                if not name:
+                    continue
+                tags_by_name.setdefault(
+                    name.casefold(),
+                    {"name": name, "color": tag.get("color", "#6B7280")},
+                )
+        return normalize_tags(list(tags_by_name.values()))
+
+    def get_tag_reference_counts(self) -> dict[str, int]:
+        """Count references per tag across all tasks."""
+        counts = {tag["name"].casefold(): 0 for tag in self.get_all_tags()}
+        for task in self.tasks.values():
+            seen_on_task: set[str] = set()
+            for tag in task.tags:
+                name = tag.get("name", "").strip()
+                if name:
+                    key = name.casefold()
+                    if key not in seen_on_task:
+                        counts[key] = counts.get(key, 0) + 1
+                        seen_on_task.add(key)
+        return counts
+
+    # ── Catalog helpers ───────────────────────────────────────────
+
+    def _load_catalog(self) -> list[dict[str, str]]:
+        if self.tag_catalog_repository is None:
+            return []
+        return self.tag_catalog_repository.load_catalog()
+
+    def _save_catalog(self, tags: list[dict[str, str]]) -> None:
+        if self.tag_catalog_repository is None:
+            return
+        self.tag_catalog_repository.save_catalog(tags)
+
+    def _sync_tag_catalog(self, new_tags: list[dict[str, str]]) -> None:
+        """Merge newly-encountered tags into the catalog."""
+        from app.domain.task_rules import normalize_tags
+        catalog = self._load_catalog()
+        existing_keys = {tag["name"].casefold() for tag in catalog}
+        for tag in new_tags:
+            if tag["name"].casefold() not in existing_keys:
+                catalog.append(tag)
+                existing_keys.add(tag["name"].casefold())
+        self._save_catalog(normalize_tags(catalog))
+
     def _preview(self, command: TaskCommand) -> CommandResult:
         if isinstance(command, AddTask):
             return self._preview_add(command)
@@ -277,6 +495,14 @@ class TaskApplication:
             return self._preview_reopen(command)
         if isinstance(command, CheckReminders):
             return self._preview_check_reminders(command)
+        if isinstance(command, RenameTag):
+            return self._preview_rename_tag(command)
+        if isinstance(command, DeleteTag):
+            return self._preview_delete_tag(command)
+        if isinstance(command, MergeTag):
+            return self._preview_merge_tag(command)
+        if isinstance(command, PruneStaleTags):
+            return self._preview_prune_stale_tags(command)
         return CommandResult(ok=False, message=f"Unsupported command: {type(command).__name__}")
 
     def _preview_add(self, command: AddTask) -> CommandResult:
@@ -455,6 +681,97 @@ class TaskApplication:
             preview={"operation": "check_reminders", "reminders": reminders},
         )
 
+    # ── Tag preview methods ───────────────────────────────────────
+
+    def _preview_rename_tag(self, command: RenameTag) -> CommandResult:
+        new_name = command.new_name.strip()
+        if not new_name:
+            return CommandResult(ok=False, message="Tag name is required")
+        old_key = command.old_name.casefold()
+        affected = 0
+        for task in self.tasks.values():
+            for tag in task.tags:
+                if tag.get("name", "").casefold() == old_key:
+                    affected += 1
+                    break
+        return CommandResult(
+            ok=True,
+            message=f"Dry run: tag would be renamed ({affected} tasks affected)",
+            would_change=affected > 0,
+            preview={
+                "operation": "rename_tag",
+                "old_name": command.old_name,
+                "new_name": new_name,
+                "affected_task_count": affected,
+            },
+        )
+
+    def _preview_delete_tag(self, command: DeleteTag) -> CommandResult:
+        key = command.name.casefold()
+        affected = 0
+        for task in self.tasks.values():
+            if any(tag.get("name", "").casefold() == key for tag in task.tags):
+                affected += 1
+        return CommandResult(
+            ok=True,
+            message=f"Dry run: tag would be deleted ({affected} tasks affected)",
+            would_change=affected > 0,
+            preview={
+                "operation": "delete_tag",
+                "tag_name": command.name,
+                "affected_task_count": affected,
+            },
+        )
+
+    def _preview_merge_tag(self, command: MergeTag) -> CommandResult:
+        source_key = command.source_name.casefold()
+        target_key = command.target_name.strip().casefold()
+        if not command.target_name.strip():
+            return CommandResult(ok=False, message="Target tag name is required")
+        if source_key == target_key:
+            return CommandResult(ok=True, message="Dry run: source and target are the same", would_change=False)
+        affected = 0
+        for task in self.tasks.values():
+            if any(tag.get("name", "").casefold() == source_key for tag in task.tags):
+                affected += 1
+        return CommandResult(
+            ok=True,
+            message=f"Dry run: tag would be merged ({affected} tasks affected)",
+            would_change=affected > 0,
+            preview={
+                "operation": "merge_tag",
+                "source_name": command.source_name,
+                "target_name": command.target_name,
+                "affected_task_count": affected,
+            },
+        )
+
+    def _preview_prune_stale_tags(self, command: PruneStaleTags) -> CommandResult:
+        cutoff = datetime.now() - timedelta(days=command.cutoff_days)
+        referenced_keys: set[str] = set()
+        for task in self.tasks.values():
+            if task.completed:
+                completed_at = parse_datetime(task.completed_at)
+                if completed_at is None or completed_at < cutoff:
+                    continue
+            for tag in task.tags:
+                name = tag.get("name", "").strip()
+                if name:
+                    referenced_keys.add(name.casefold())
+
+        catalog = self._load_catalog()
+        stale = [t for t in catalog if t["name"].casefold() not in referenced_keys]
+        return CommandResult(
+            ok=True,
+            message=f"Dry run: {len(stale)} stale tags would be pruned",
+            would_change=len(stale) > 0,
+            preview={
+                "operation": "prune_stale_tags",
+                "stale_tags": stale,
+                "stale_count": len(stale),
+            },
+        )
+
     def _preview_result(
         self,
         operation: str,
@@ -536,22 +853,8 @@ class TaskApplication:
         return None
 
     def _normalize_tags(self, tags: list[dict[str, str]] | None) -> list[dict[str, str]]:
-        if not tags:
-            return []
-
-        normalized = []
-        seen = set()
-        for tag in tags:
-            if not isinstance(tag, dict):
-                continue
-            name = str(tag.get("name", "")).strip()
-            color = str(tag.get("color", "#6B7280")).strip() or "#6B7280"
-            key = name.casefold()
-            if not name or key in seen:
-                continue
-            seen.add(key)
-            normalized.append({"name": name, "color": color})
-        return normalized
+        from app.domain.task_rules import normalize_tags
+        return normalize_tags(tags)
 
     def _validate_completed_at(
         self,
@@ -563,8 +866,9 @@ class TaskApplication:
         return None
 
     def _requires_dry_run(self, command: TaskCommand, context: CommandContext) -> bool:
+        destructive = isinstance(command, (DeleteTask, DeleteTag, PruneStaleTags))
         return (
-            isinstance(command, DeleteTask)
+            destructive
             and context.source == FUTURE_AI_SOURCE
             and not context.dry_run
         )

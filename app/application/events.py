@@ -16,4 +16,11 @@ class ReminderTriggered:
     title: str
 
 
-ApplicationEvent = Union[TaskChanged, ReminderTriggered]
+@dataclass(frozen=True)
+class TagChanged:
+    action: str
+    tag_name: Optional[str] = None
+    affected_task_count: int = 0
+
+
+ApplicationEvent = Union[TaskChanged, ReminderTriggered, TagChanged]

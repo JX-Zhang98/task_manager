@@ -55,6 +55,33 @@ class CheckReminders:
     now: Optional[datetime] = None
 
 
+# ── Tag commands ──────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class RenameTag:
+    old_name: str
+    new_name: str
+    color: str = "#6B7280"
+
+
+@dataclass(frozen=True)
+class DeleteTag:
+    name: str
+
+
+@dataclass(frozen=True)
+class MergeTag:
+    source_name: str
+    target_name: str
+    target_color: str = "#6B7280"
+
+
+@dataclass(frozen=True)
+class PruneStaleTags:
+    cutoff_days: int = 90
+
+
 TaskCommand = Union[
     AddTask,
     UpdateTask,
@@ -63,4 +90,8 @@ TaskCommand = Union[
     CompleteTask,
     ReopenTask,
     CheckReminders,
+    RenameTag,
+    DeleteTag,
+    MergeTag,
+    PruneStaleTags,
 ]
