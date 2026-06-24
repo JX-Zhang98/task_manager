@@ -11,8 +11,12 @@ from app.application.commands import (
     AddTask,
     CheckReminders,
     CompleteTask,
+    DeleteTag,
     DeleteTask,
+    MergeTag,
     MoveTask,
+    PruneStaleTags,
+    RenameTag,
     ReopenTask,
     UpdateTask,
 )
@@ -22,8 +26,10 @@ from app.application.results import CommandResult
 from app.application.serializers import command_result_to_dict, task_to_dict
 from app.application.task_app import TaskApplication
 from app.config import DATA_DIR, TAG_COLORS
+from app.domain.task_rules import normalize_tags
 from app.infrastructure.audit_log import JsonlAuditLog
 from app.infrastructure.json_task_repository import JsonTaskRepository
+from app.infrastructure.json_tag_catalog_repository import JsonTagCatalogRepository
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -45,9 +51,14 @@ def main(argv: list[str] | None = None) -> int:
             pretty=args.pretty,
         )
     if args.command == "tags":
+        all_tags = application.get_all_tags()
+        counts = application.get_tag_reference_counts()
+        tags_with_counts = [
+            {**tag, "count": counts.get(tag["name"].casefold(), 0)} for tag in all_tags
+        ]
         return print_query_result(
             "Tags listed",
-            {"tags": get_all_tags(application, args.file)},
+            {"tags": tags_with_counts},
             pretty=args.pretty,
         )
     if args.command == "get":
@@ -143,6 +154,27 @@ def build_parser() -> argparse.ArgumentParser:
     reminders_parser.add_argument("--now")
     add_execution_options(reminders_parser)
 
+    # ── Tag management subcommands ────────────────────────────────
+
+    tag_rename_parser = subparsers.add_parser("tag-rename", help="Rename a tag across all tasks")
+    tag_rename_parser.add_argument("old_name")
+    tag_rename_parser.add_argument("new_name")
+    tag_rename_parser.add_argument("--color", help="New color for the renamed tag")
+    add_execution_options(tag_rename_parser, confirm=True)
+
+    tag_delete_parser = subparsers.add_parser("tag-delete", help="Delete a tag from all tasks")
+    tag_delete_parser.add_argument("name")
+    add_execution_options(tag_delete_parser, confirm=True)
+
+    tag_merge_parser = subparsers.add_parser("tag-merge", help="Merge one tag into another")
+    tag_merge_parser.add_argument("source_name")
+    tag_merge_parser.add_argument("target_name")
+    add_execution_options(tag_merge_parser, confirm=True)
+
+    tag_prune_parser = subparsers.add_parser("tag-prune", help="Remove unreferenced stale tags")
+    tag_prune_parser.add_argument("--cutoff-days", type=int, default=90)
+    add_execution_options(tag_prune_parser, confirm=True)
+
     return parser
 
 
@@ -155,7 +187,12 @@ def add_execution_options(parser: argparse.ArgumentParser, *, confirm: bool = Fa
 def build_application(filename: str, audit_file: str | None) -> TaskApplication:
     data_path = Path(filename)
     audit_path = Path(audit_file) if audit_file else data_path.parent / "audit.log.jsonl"
-    return TaskApplication(JsonTaskRepository(data_path), audit_log=JsonlAuditLog(audit_path))
+    tag_catalog_path = data_path.parent / "tags.json"
+    return TaskApplication(
+        JsonTaskRepository(data_path),
+        audit_log=JsonlAuditLog(audit_path),
+        tag_catalog_repository=JsonTagCatalogRepository(tag_catalog_path),
+    )
 
 
 def build_context(args: argparse.Namespace) -> CommandContext:
@@ -181,7 +218,7 @@ def dispatch_command(
                 has_time=args.has_time,
                 reminder_minutes=args.reminder_minutes,
                 quadrant=args.quadrant,
-                tags=build_tags(application, args.file, args.tag),
+                tags=build_tags(application, args.tag),
             ),
             context=context,
         )
@@ -213,6 +250,40 @@ def dispatch_command(
         except ValueError:
             return CommandResult(ok=False, message="Invalid datetime")
         return application.dispatch(CheckReminders(now=now), context=context)
+
+    # ── Tag management commands ───────────────────────────────────
+    if args.command == "tag-rename":
+        if not args.confirm and not context.dry_run:
+            return CommandResult(ok=False, message="tag-rename requires --confirm or --dry-run")
+        color = args.color or resolve_tag_color(application, args.new_name)
+        return application.dispatch(
+            RenameTag(old_name=args.old_name, new_name=args.new_name, color=color),
+            context=context,
+        )
+    if args.command == "tag-delete":
+        if not args.confirm and not context.dry_run:
+            return CommandResult(ok=False, message="tag-delete requires --confirm or --dry-run")
+        return application.dispatch(DeleteTag(name=args.name), context=context)
+    if args.command == "tag-merge":
+        if not args.confirm and not context.dry_run:
+            return CommandResult(ok=False, message="tag-merge requires --confirm or --dry-run")
+        target_color = resolve_tag_color(application, args.target_name)
+        return application.dispatch(
+            MergeTag(
+                source_name=args.source_name,
+                target_name=args.target_name,
+                target_color=target_color,
+            ),
+            context=context,
+        )
+    if args.command == "tag-prune":
+        if not args.confirm and not context.dry_run:
+            return CommandResult(ok=False, message="tag-prune requires --confirm or --dry-run")
+        return application.dispatch(
+            PruneStaleTags(cutoff_days=args.cutoff_days),
+            context=context,
+        )
+
     return CommandResult(ok=False, message=f"Unsupported command: {args.command}")
 
 
@@ -264,15 +335,14 @@ def filter_tasks_by_tag(tasks, tag_name: str | None):
         return tasks
     key = tag_name.casefold()
     return [
-        task
-        for task in tasks
-        if any(tag.get("name", "").casefold() == key for tag in task.tags)
+        task for task in tasks if any(tag.get("name", "").casefold() == key for tag in task.tags)
     ]
 
 
-def build_tags(application: TaskApplication, filename: str, tag_names: list[str]) -> list[dict[str, str]]:
-    existing = {tag["name"].casefold(): tag for tag in get_all_tags(application, filename)}
-    result = []
+def build_tags(application: TaskApplication, tag_names: list[str]) -> list[dict[str, str]]:
+    """Construct tag dicts from CLI --tag arguments, resolving colors from the catalog."""
+    existing = {tag["name"].casefold(): tag for tag in application.get_all_tags()}
+    result: list[dict[str, str]] = []
     used = set(existing)
     for raw_name in tag_names:
         name = raw_name.strip()
@@ -287,60 +357,15 @@ def build_tags(application: TaskApplication, filename: str, tag_names: list[str]
         color = TAG_COLORS[len(used) % len(TAG_COLORS)]
         used.add(key)
         result.append({"name": name, "color": color})
-    return result
+    return normalize_tags(result)
 
 
-def get_all_tags(application: TaskApplication, filename: str) -> list[dict[str, Any]]:
-    tags_by_name = {}
-    for tag in load_tag_catalog(filename):
-        tags_by_name[tag["name"].casefold()] = {**tag, "count": 0}
-
-    for task in application.tasks.values():
-        seen_on_task = set()
-        for tag in task.tags:
-            name = str(tag.get("name", "")).strip()
-            if not name:
-                continue
-            key = name.casefold()
-            tags_by_name.setdefault(
-                key,
-                {
-                    "name": name,
-                    "color": tag.get("color", "#6B7280"),
-                    "count": 0,
-                },
-            )
-            if key not in seen_on_task:
-                tags_by_name[key]["count"] += 1
-                seen_on_task.add(key)
-    return sorted(tags_by_name.values(), key=lambda tag: tag["name"].casefold())
-
-
-def load_tag_catalog(filename: str) -> list[dict[str, str]]:
-    catalog_path = Path(filename).parent / "tags.json"
-    if not catalog_path.exists():
-        return []
-    try:
-        with catalog_path.open("r", encoding="utf-8") as handle:
-            raw = json.load(handle)
-    except (OSError, json.JSONDecodeError, TypeError):
-        return []
-    if not isinstance(raw, list):
-        return []
-
-    tags = []
-    seen = set()
-    for tag in raw:
-        if not isinstance(tag, dict):
-            continue
-        name = str(tag.get("name", "")).strip()
-        color = str(tag.get("color", "#6B7280")).strip() or "#6B7280"
-        key = name.casefold()
-        if not name or key in seen:
-            continue
-        seen.add(key)
-        tags.append({"name": name, "color": color})
-    return tags
+def resolve_tag_color(application: TaskApplication, name: str) -> str:
+    """Look up a tag's color from the catalog, defaulting to #6B7280."""
+    for tag in application.get_all_tags():
+        if tag["name"].casefold() == name.strip().casefold():
+            return tag["color"]
+    return "#6B7280"
 
 
 def print_query_result(message: str, data: dict[str, Any], *, pretty: bool) -> int:

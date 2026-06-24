@@ -18,7 +18,7 @@ class MainWindow(QMainWindow):
         self.resize(1100, 750)
 
         self.setWindowFlag(self.windowFlags() | Qt.WindowType.Tool)
-        
+
         self.service = TaskService()
         self.setup_tray()
         self.setup_ui()
@@ -79,12 +79,11 @@ class MainWindow(QMainWindow):
     def on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.show_window()
-    
-    def show_window(self):
-            self.showNormal()          # 从最小化/隐藏恢复
-            self.raise_()              # 提到最前
-            self.activateWindow()      # 获取焦点
 
+    def show_window(self):
+        self.showNormal()  # 从最小化/隐藏恢复
+        self.raise_()  # 提到最前
+        self.activateWindow()  # 获取焦点
 
     def closeEvent(self, event):
         super().closeEvent(event)

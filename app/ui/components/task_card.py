@@ -203,7 +203,9 @@ class TaskCardWidget(QWidget):
         self.setStyleSheet(STYLE_CARD_CONTAINER)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(self.shadow_margin, self.shadow_margin, self.shadow_margin, self.shadow_margin)
+        layout.setContentsMargins(
+            self.shadow_margin, self.shadow_margin, self.shadow_margin, self.shadow_margin
+        )
         layout.setSpacing(0)
 
         surface = QFrame()

@@ -143,7 +143,11 @@ class ClickableDateTimeEdit(QDateTimeEdit):
         super().mousePressEvent(event)
 
     def keyPressEvent(self, event) -> None:
-        if self.isEnabled() and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+        if self.isEnabled() and event.key() in (
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Space,
+        ):
             self.parent_dialog.open_date_time_picker()
             event.accept()
             return
@@ -288,7 +292,9 @@ class DateTimePickerPopup(QWidget):
 
 
 class TaskDialog(QDialog):
-    def __init__(self, parent=None, task: Task = None, all_tags: list[dict[str, str]] | None = None):
+    def __init__(
+        self, parent=None, task: Task = None, all_tags: list[dict[str, str]] | None = None
+    ):
         super().__init__(parent)
         self.task = task
         self.all_tags = self._normalize_tags(all_tags or [])
@@ -536,9 +542,7 @@ class TaskDialog(QDialog):
         candidate_layout.setContentsMargins(10, 10, 10, 10)
         candidate_layout.setSpacing(8)
 
-        available = [
-            tag for tag in self.all_tags if not self._has_selected_tag(tag["name"])
-        ]
+        available = [tag for tag in self.all_tags if not self._has_selected_tag(tag["name"])]
         if available:
             available_widget = QWidget()
             available_layout = FlowLayout(available_widget, spacing=6)
@@ -614,19 +618,9 @@ class TaskDialog(QDialog):
         return TAG_COLORS[len(names) % len(TAG_COLORS)]
 
     def _normalize_tags(self, tags: list[dict[str, str]]) -> list[dict[str, str]]:
-        normalized = []
-        seen = set()
-        for tag in tags:
-            if not isinstance(tag, dict):
-                continue
-            name = str(tag.get("name", "")).strip()
-            color = str(tag.get("color", "#6B7280")).strip() or "#6B7280"
-            key = name.casefold()
-            if not name or key in seen:
-                continue
-            seen.add(key)
-            normalized.append({"name": name, "color": color})
-        return normalized
+        from app.domain.task_rules import normalize_tags
+
+        return normalize_tags(tags)
 
     def _make_tag_button(self, tag: dict[str, str], handler) -> QPushButton:
         display_name = self._tag_display_name(tag["name"])
