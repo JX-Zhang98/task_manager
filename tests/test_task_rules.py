@@ -137,7 +137,9 @@ def test_normalize_tags_handles_various_inputs():
         {"name": "Home", "color": "#6B7280"},
         {"name": "Work", "color": "#6B7280"},
     ]
-    assert normalize_tags([{"name": "Work", "color": "#2563EB"}, {"name": "work", "color": "#059669"}]) == [
+    assert normalize_tags(
+        [{"name": "Work", "color": "#2563EB"}, {"name": "work", "color": "#059669"}]
+    ) == [
         {"name": "Work", "color": "#2563EB"},  # first occurrence wins
     ]
     assert normalize_tags([{"name": "", "color": "#2563EB"}]) == []

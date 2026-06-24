@@ -216,7 +216,9 @@ class TaskApplication:
             and old_index is not None
         ):
             insert_index = (
-                command.insert_index - 1 if command.insert_index > old_index else command.insert_index
+                command.insert_index - 1
+                if command.insert_index > old_index
+                else command.insert_index
             )
             if insert_index == old_index:
                 return CommandResult(ok=True, message="Task already in position", task_id=task.id)
@@ -322,7 +324,11 @@ class TaskApplication:
             ok=True,
             message="Tag renamed",
             changed=True,
-            data={"affected_task_count": affected, "old_name": command.old_name, "new_name": new_name},
+            data={
+                "affected_task_count": affected,
+                "old_name": command.old_name,
+                "new_name": new_name,
+            },
             events=[TaskChanged(action="rename_tag")],
         )
 
@@ -379,7 +385,11 @@ class TaskApplication:
             ok=True,
             message="Tag merged",
             changed=True,
-            data={"affected_task_count": affected, "source_name": command.source_name, "target_name": target_name},
+            data={
+                "affected_task_count": affected,
+                "source_name": command.source_name,
+                "target_name": target_name,
+            },
             events=[TaskChanged(action="merge_tag")],
         )
 
@@ -403,7 +413,9 @@ class TaskApplication:
         affected = 0
         for task in self.tasks.values():
             before_count = len(task.tags)
-            task.tags = [tag for tag in task.tags if tag.get("name", "").casefold() not in stale_keys]
+            task.tags = [
+                tag for tag in task.tags if tag.get("name", "").casefold() not in stale_keys
+            ]
             if len(task.tags) < before_count:
                 affected += 1
 
@@ -425,6 +437,7 @@ class TaskApplication:
     def get_all_tags(self) -> list[dict[str, str]]:
         """Merge catalog tags + inline task tags, deduped by casefold key."""
         from app.domain.task_rules import normalize_tags
+
         tags_by_name: dict[str, dict[str, str]] = {}
         for tag in self._load_catalog():
             tags_by_name[tag["name"].casefold()] = tag
@@ -468,6 +481,7 @@ class TaskApplication:
     def _sync_tag_catalog(self, new_tags: list[dict[str, str]]) -> None:
         """Merge newly-encountered tags into the catalog."""
         from app.domain.task_rules import normalize_tags
+
         catalog = self._load_catalog()
         existing_keys = {tag["name"].casefold() for tag in catalog}
         for tag in new_tags:
@@ -610,7 +624,9 @@ class TaskApplication:
         return [task for task in self.get_visible_matrix_tasks() if task.quadrant == quadrant]
 
     def reorder_visible_tasks(self, quadrant: str, moved_task_id: str, insert_index: int) -> None:
-        ordered = [task for task in self.visible_tasks_for_quadrant(quadrant) if task.id != moved_task_id]
+        ordered = [
+            task for task in self.visible_tasks_for_quadrant(quadrant) if task.id != moved_task_id
+        ]
         moved_task = self.tasks.get(moved_task_id)
         if moved_task is None:
             return
@@ -725,7 +741,9 @@ class TaskApplication:
         if not command.target_name.strip():
             return CommandResult(ok=False, message="Target tag name is required")
         if source_key == target_key:
-            return CommandResult(ok=True, message="Dry run: source and target are the same", would_change=False)
+            return CommandResult(
+                ok=True, message="Dry run: source and target are the same", would_change=False
+            )
         affected = 0
         for task in self.tasks.values():
             if any(tag.get("name", "").casefold() == source_key for tag in task.tags):
@@ -850,6 +868,7 @@ class TaskApplication:
 
     def _normalize_tags(self, tags: list[dict[str, str]] | None) -> list[dict[str, str]]:
         from app.domain.task_rules import normalize_tags
+
         return normalize_tags(tags)
 
     def _validate_completed_at(
@@ -863,11 +882,7 @@ class TaskApplication:
 
     def _requires_dry_run(self, command: TaskCommand, context: CommandContext) -> bool:
         destructive = isinstance(command, (DeleteTask, DeleteTag, PruneStaleTags))
-        return (
-            destructive
-            and context.source == FUTURE_AI_SOURCE
-            and not context.dry_run
-        )
+        return destructive and context.source == FUTURE_AI_SOURCE and not context.dry_run
 
     def _task_id_from_command(self, command: TaskCommand) -> str | None:
         return getattr(command, "task_id", None)

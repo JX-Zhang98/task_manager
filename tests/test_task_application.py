@@ -62,7 +62,11 @@ def make_application(tasks=None, audit_log=None, tag_catalog=None):
     event_bus.subscribe(TaskChanged, events.append)
     event_bus.subscribe(ReminderTriggered, events.append)
     tag_repo = tag_catalog or InMemoryTagCatalogRepository()
-    return TaskApplication(repository, event_bus, audit_log, tag_catalog_repository=tag_repo), repository, events
+    return (
+        TaskApplication(repository, event_bus, audit_log, tag_catalog_repository=tag_repo),
+        repository,
+        events,
+    )
 
 
 def task_changed_events(events):
@@ -127,9 +131,7 @@ def test_task_application_dispatches_task_lifecycle_commands():
 def test_task_application_adds_and_updates_tags():
     app, repository, events = make_application()
 
-    add_result = app.dispatch(
-        AddTask(title="Tagged", tags=[{"name": "Work", "color": "#2563EB"}])
-    )
+    add_result = app.dispatch(AddTask(title="Tagged", tags=[{"name": "Work", "color": "#2563EB"}]))
     task_id = add_result.task_id
 
     assert add_result.ok
@@ -345,7 +347,12 @@ def test_task_application_prunes_stale_tags():
     old_task_result = app.dispatch(AddTask(title="Old done", tags=[old]))
 
     # Complete recent and old tasks
-    app.dispatch(CompleteTask(task_id=recent_task_result.task_id, completed_at=datetime.now().isoformat(timespec="seconds")))
+    app.dispatch(
+        CompleteTask(
+            task_id=recent_task_result.task_id,
+            completed_at=datetime.now().isoformat(timespec="seconds"),
+        )
+    )
     app.dispatch(CompleteTask(task_id=old_task_result.task_id, completed_at="2000-01-01T10:00:00"))
 
     # Clear events from prior dispatches
@@ -522,15 +529,17 @@ def test_task_application_update_task_syncs_catalog():
     app, repository, events = make_application(tag_catalog=tag_repo)
 
     add_result = app.dispatch(AddTask(title="Task"))
-    app.dispatch(UpdateTask(
-        task_id=add_result.task_id,
-        title="Task",
-        description="",
-        due_date=None,
-        has_time=False,
-        reminder_minutes=None,
-        tags=[{"name": "NewLabel", "color": "#059669"}],
-    ))
+    app.dispatch(
+        UpdateTask(
+            task_id=add_result.task_id,
+            title="Task",
+            description="",
+            due_date=None,
+            has_time=False,
+            reminder_minutes=None,
+            tags=[{"name": "NewLabel", "color": "#059669"}],
+        )
+    )
 
     catalog = tag_repo.load_catalog()
     assert any(t["name"] == "NewLabel" for t in catalog)

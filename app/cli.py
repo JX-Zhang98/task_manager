@@ -54,8 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         all_tags = application.get_all_tags()
         counts = application.get_tag_reference_counts()
         tags_with_counts = [
-            {**tag, "count": counts.get(tag["name"].casefold(), 0)}
-            for tag in all_tags
+            {**tag, "count": counts.get(tag["name"].casefold(), 0)} for tag in all_tags
         ]
         return print_query_result(
             "Tags listed",
@@ -270,7 +269,11 @@ def dispatch_command(
             return CommandResult(ok=False, message="tag-merge requires --confirm or --dry-run")
         target_color = resolve_tag_color(application, args.target_name)
         return application.dispatch(
-            MergeTag(source_name=args.source_name, target_name=args.target_name, target_color=target_color),
+            MergeTag(
+                source_name=args.source_name,
+                target_name=args.target_name,
+                target_color=target_color,
+            ),
             context=context,
         )
     if args.command == "tag-prune":
@@ -332,9 +335,7 @@ def filter_tasks_by_tag(tasks, tag_name: str | None):
         return tasks
     key = tag_name.casefold()
     return [
-        task
-        for task in tasks
-        if any(tag.get("name", "").casefold() == key for tag in task.tags)
+        task for task in tasks if any(tag.get("name", "").casefold() == key for tag in task.tags)
     ]
 
 

@@ -70,4 +70,5 @@ class Task:
     @staticmethod
     def _normalize_tags(value: Any) -> list[dict[str, str]]:
         from app.domain.task_rules import normalize_tags
+
         return normalize_tags(value)

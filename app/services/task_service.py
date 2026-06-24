@@ -44,7 +44,9 @@ class TaskService(QObject):
         self.event_bus.subscribe(TaskChanged, self._handle_task_changed)
         self.event_bus.subscribe(ReminderTriggered, self._handle_reminder_triggered)
         self.application = TaskApplication(
-            self.repository, self.event_bus, self.audit_log,
+            self.repository,
+            self.event_bus,
+            self.audit_log,
             tag_catalog_repository=self.tag_catalog_repo,
         )
 
@@ -116,7 +118,9 @@ class TaskService(QObject):
     def delete_task(self, task_id: str) -> None:
         self._dispatch(DeleteTask(task_id=task_id))
 
-    def move_task(self, task_id: str, new_quadrant: str, insert_index: Optional[int] = None) -> None:
+    def move_task(
+        self, task_id: str, new_quadrant: str, insert_index: Optional[int] = None
+    ) -> None:
         self._dispatch(
             MoveTask(task_id=task_id, new_quadrant=new_quadrant, insert_index=insert_index)
         )
