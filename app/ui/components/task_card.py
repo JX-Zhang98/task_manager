@@ -25,6 +25,7 @@ from app.config import (
 )
 from app.models.task import Task
 from app.resources.strings import Strings
+from app.ui.components.markdown_text_edit import MarkdownTextEdit
 
 
 class TagPill(QLabel):
@@ -158,27 +159,54 @@ class TaskInfoPopup(QWidget):
 
         v_layout = QVBoxLayout(container)
         v_layout.setContentsMargins(15, 12, 15, 12)
-        v_layout.setSpacing(8)
+        v_layout.setSpacing(4)
 
-        lbl_title = QLabel(task.title)
-        lbl_title.setWordWrap(True)
-        lbl_title.setStyleSheet(
-            "font-size: 14px; font-weight: 700; border: none; background: transparent;"
-        )
-        v_layout.addWidget(lbl_title)
-
+        # Title is already visible on the card — only show description
+        # in the popup, up to 10 lines of content (≈200 px at 13px font).
         if task.description and task.description.strip():
-            line = QFrame()
-            line.setFrameShape(QFrame.Shape.HLine)
-            line.setStyleSheet("background-color: #E5E7EB; max-height: 1px; border: none;")
-            v_layout.addWidget(line)
-
-            lbl_desc = QLabel(task.description)
-            lbl_desc.setWordWrap(True)
-            lbl_desc.setStyleSheet(
-                "font-size: 13px; color: #4B5563; border: none; background: transparent;"
+            # Use a read-only MarkdownTextEdit to render Markdown descriptions.
+            # Reusing MarkdownTextEdit gives us loadResource override for
+            # proper image resolution and baseUrl handling.
+            popup_content_width = 250  # 300 - 10*2 (outer) - 15*2 (container)
+            desc_view = MarkdownTextEdit()
+            desc_view.setReadOnly(True)
+            desc_view.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            desc_view.setFrameShape(QFrame.Shape.NoFrame)
+            desc_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            desc_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            desc_view.setStyleSheet(
+                "font-size: 13px; color: #4B5563; background: transparent; padding: 0px; margin: 0px;"
             )
-            v_layout.addWidget(lbl_desc)
+
+            # Force the document to lay out at the popup's content width
+            # so that document().size().height() returns a correct value.
+            # (Before the widget is shown, the viewport width is 0, so
+            # QTextDocument cannot calculate line wrapping and returns
+            # height ≈ 0.  When the popup is later shown, QTextEdit's
+            # resizeEvent will override this with the actual viewport width.)
+            desc_view.document().setTextWidth(popup_content_width)
+            desc_view.set_description(task.description)
+
+            # Scale images to 90 % of the popup content width.
+            desc_view._scale_images_to_width(int(popup_content_width * 0.9))
+
+            # Limit to approximately 10 lines of content (≈200 px).
+            doc_height = desc_view.document().size().height()
+            max_height = 200
+
+            if doc_height <= max_height:
+                desc_view.setFixedHeight(int(doc_height) + 4)
+                v_layout.addWidget(desc_view)
+            else:
+                desc_view.setFixedHeight(max_height)
+                v_layout.addWidget(desc_view)
+
+                # Add a visible truncation indicator below the clipped view.
+                ellipsis = QLabel("…")
+                ellipsis.setStyleSheet(
+                    "font-size: 12px; color: #9CA3AF; border: none; background: transparent;"
+                )
+                v_layout.addWidget(ellipsis)
 
         main_layout.addWidget(container)
         self.setFixedWidth(300)

@@ -10,6 +10,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 APP_ROOT = Path(sys.executable).resolve().parent if IS_FROZEN else BASE_DIR
 RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", BASE_DIR))
 DATA_DIR = APP_ROOT / "data"
+IMAGE_DIR = DATA_DIR / "images"
 LANGUAGE = "cn"
 Strings.current_lang = LANGUAGE
 
