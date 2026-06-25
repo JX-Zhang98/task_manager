@@ -9,7 +9,6 @@ from PyQt6.QtWidgets import (
     QDateTimeEdit,
     QDialog,
     QDial,
-    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -334,39 +333,29 @@ class TaskDialog(QDialog):
         self.title_edit.setStyleSheet(STYLE_INPUT)
         layout.addWidget(self.title_edit)
 
+        desc_header = QHBoxLayout()
+        desc_header.setContentsMargins(0, 0, 0, 0)
+        desc_header.setSpacing(6)
+
         lbl_desc = QLabel(Strings.get("label_desc"))
         lbl_desc.setStyleSheet(STYLE_FORM_LABEL)
-        layout.addWidget(lbl_desc)
+        desc_header.addWidget(lbl_desc)
 
-        # Description toolbar: insert image + source/render toggle
-        desc_toolbar = QHBoxLayout()
-        desc_toolbar.setContentsMargins(0, 0, 0, 4)
-        desc_toolbar.setSpacing(6)
-
-        self.btn_insert_image = QPushButton("📎 插入图片")
-        self.btn_insert_image.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_insert_image.setStyleSheet(
-            f"QPushButton {{ border: 1px solid {STYLE_INPUT}; "
-            f"border-radius: 4px; padding: 3px 8px; font-size: 12px; "
-            f"color: #6B7280; background: transparent; }} "
-            f"QPushButton:hover {{ background-color: #F3F4F6; }}"
-        )
-        self.btn_insert_image.clicked.connect(self._insert_image)
-        desc_toolbar.addWidget(self.btn_insert_image)
-
-        self.btn_toggle_source = QPushButton("📝 源码")
+        self.btn_toggle_source = QPushButton("🔁")
+        self.btn_toggle_source.setFixedSize(24, 24)
         self.btn_toggle_source.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_toggle_source.setToolTip("切换渲染/源码模式 (Ctrl+/)")
         self.btn_toggle_source.setStyleSheet(
             f"QPushButton {{ border: 1px solid {STYLE_INPUT}; "
-            f"border-radius: 4px; padding: 3px 8px; font-size: 12px; "
+            f"border-radius: 4px; font-size: 14px; "
             f"color: #6B7280; background: transparent; }} "
             f"QPushButton:hover {{ background-color: #F3F4F6; }}"
         )
         self.btn_toggle_source.clicked.connect(self._toggle_desc_source_mode)
-        desc_toolbar.addWidget(self.btn_toggle_source)
+        desc_header.addWidget(self.btn_toggle_source)
 
-        desc_toolbar.addStretch()
-        layout.addLayout(desc_toolbar)
+        desc_header.addStretch()
+        layout.addLayout(desc_header)
 
         self.desc_edit = MarkdownTextEdit()
         self.desc_edit.setPlaceholderText(Strings.get("placeholder_desc"))
@@ -513,22 +502,8 @@ class TaskDialog(QDialog):
         self.reminder_combo.setEnabled(has_date)
         self.due_edit.setDisplayFormat("yyyy-MM-dd HH:mm" if has_time else "yyyy-MM-dd")
 
-    def _insert_image(self) -> None:
-        filepath, _ = QFileDialog.getOpenFileName(
-            self,
-            "选择图片",
-            "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)",
-        )
-        if filepath:
-            self.desc_edit.insert_image_file(filepath)
-
     def _toggle_desc_source_mode(self) -> None:
         self.desc_edit.toggle_source_mode()
-        if self.desc_edit.is_source_mode():
-            self.btn_toggle_source.setText("👁 渲染")
-        else:
-            self.btn_toggle_source.setText("📝 源码")
 
     def save_task(self) -> None:
         title = self.title_edit.text().strip()

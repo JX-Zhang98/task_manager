@@ -6,7 +6,7 @@ import shutil
 import time
 from pathlib import Path
 
-from PyQt6.QtCore import QUrl
+from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QImage, QTextCursor, QTextDocument, QTextImageFormat
 from PyQt6.QtWidgets import QTextEdit
 
@@ -58,6 +58,34 @@ class MarkdownTextEdit(QTextEdit):
             if not image.isNull():
                 return image
         return super().loadResource(type, url)
+
+    # ── Keyboard shortcut ──────────────────────────────────────────────
+
+    def keyPressEvent(self, event):
+        """Handle Ctrl+/ to toggle between rendered and source mode."""
+        if (
+            event.modifiers() == Qt.KeyboardModifier.ControlModifier
+            and event.key() == Qt.Key.Key_Slash
+        ):
+            self.toggle_source_mode()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    # ── Resize handling ──────────────────────────────────────────────
+
+    def resizeEvent(self, event):
+        """Re-scale images when the widget is properly sized.
+
+        ``_apply_content()`` is called before the widget is shown, when
+        ``self.width()`` is still 0.  Images are therefore rendered at
+        their natural size by ``setMarkdown()``.  This override re-scales
+        them to 90 % of the real editor width once the layout manager
+        has given the widget its actual geometry.
+        """
+        super().resizeEvent(event)
+        if not self._source_mode and self.width() > 0:
+            self._scale_images_to_width(int(self.width() * 0.9))
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -158,8 +186,6 @@ class MarkdownTextEdit(QTextEdit):
                     cursor = self.textCursor()
                     cursor.insertHtml(processed_html)
                     self._raw_markdown = self.markdown_source()
-                    # Scale any images that are too wide.
-                    self._scale_images_to_width(max(int(self.width() * 0.9), 240))
                 return
 
         # Priority 2: Pure image (screenshot / single image copy).
@@ -360,5 +386,3 @@ class MarkdownTextEdit(QTextEdit):
         else:
             preprocessed = self._preprocess_for_render(self._raw_markdown)
             self.setMarkdown(preprocessed)
-            # Scale images that are wider than the editor.
-            self._scale_images_to_width(max(int(self.width() * 0.9), 240))
