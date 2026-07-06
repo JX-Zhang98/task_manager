@@ -64,7 +64,7 @@ class ArchiveDialog(QDialog):
             item = QListWidgetItem(self.list_widget)
             item.setData(Qt.ItemDataRole.UserRole, task.id)
 
-            widget = TaskCardWidget(task, on_status_change=self.handle_restore)
+            widget = TaskCardWidget(task, on_status_change=self.handle_restore, archived=True)
             height = widget.update_preferred_height(current_width)
             item.setSizeHint(QSize(current_width, height))
             self.list_widget.setItemWidget(item, widget)

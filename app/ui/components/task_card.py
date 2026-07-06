@@ -214,12 +214,13 @@ class TaskInfoPopup(QWidget):
 
 
 class TaskCardWidget(QWidget):
-    def __init__(self, task: Task, on_status_change=None, on_tag_double_clicked=None):
+    def __init__(self, task: Task, on_status_change=None, on_tag_double_clicked=None, archived=False):
         super().__init__()
         self.task = task
         self.popup = None
         self.on_status_change = on_status_change
         self.on_tag_double_clicked = on_tag_double_clicked
+        self.archived = archived
         self.has_tags = bool(task.tags)
         self.has_bottom_info = bool(task.due_date or task.reminder_minutes is not None)
         self.shadow_margin = 4
@@ -353,13 +354,10 @@ class TaskCardWidget(QWidget):
 
     def update_visual_style(self, completed: bool) -> None:
         self.lbl_title.setStyleSheet(STYLE_COMPLETED_TEXT if completed else STYLE_CARD_TITLE)
-        # For completed tasks, change the card background to the quadrant's
-        # light background color so archived tasks are visually grouped by
-        # their original quadrant.
-        # Must update self.surface's own local stylesheet — Qt gives local
-        # styles higher priority than parent-level selectors, so the surface's
-        # STYLE_CARD_CONTAINER (white bg) would override any parent rules.
-        if completed:
+        # Only apply quadrant background color for archived cards (归档箱).
+        # Cards that are still in the quadrant should keep the default white
+        # style even when completed — they will be moved to archive soon.
+        if completed and self.archived:
             quadrant_bg = self._quadrant_bg_color()
             if quadrant_bg:
                 self.setStyleSheet("TaskCardWidget { background: transparent; }")
