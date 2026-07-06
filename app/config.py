@@ -23,6 +23,11 @@ APP_LOGO_PATH = resource_path("app_logo.svg")
 ICON_INBOX_PATH = resource_path("icon_inbox.svg")
 ICON_ARCHIVE_PATH = resource_path("icon_archive.svg")
 ICON_MATRIX_PATH = resource_path("icon_matrix.svg")
+ICON_MINIMIZE_PATH = resource_path("minimize.svg")
+ICON_MAXIMIZE_PATH = resource_path("maximize.svg")
+ICON_RESTORE_PATH = resource_path("restore.svg")
+ICON_CLOSE_PATH = resource_path("close.svg")
+ICON_CLOSE_WHITE_PATH = resource_path("close_white.svg")
 CHECKBOX_UNCHECKED_PATH = resource_path("checkbox_unchecked.svg")
 CHECKBOX_CHECKED_PATH = resource_path("checkbox_checked.svg")
 DATE_ARROW_DOWN_PATH = resource_path("date_arrow_down.svg")
@@ -55,6 +60,9 @@ TAG_COLORS = [
     "#4F46E5",
     "#0F766E",
 ]
+
+TITLE_BAR_HEIGHT = 36
+RESIZE_MARGIN = 6
 
 _QUADRANT_PRESENTATION = {
     "q1": {"row": 0, "col": 0, "bg": "#FEF2F2", "text": "#7F1D1D"},
@@ -133,6 +141,54 @@ GLOBAL_STYLES = f"""
     QListWidget::item:selected {{
         background: transparent;
         outline: none;
+    }}
+"""
+
+TITLE_BAR_BG = COLORS["surface"]
+
+STYLE_TITLE_BAR = f"""
+    QWidget#titleBar {{
+        background-color: {TITLE_BAR_BG};
+    }}
+    QLabel#titleBarIcon {{
+        background: transparent;
+        border: none;
+        margin-left: 10px;
+    }}
+    QLabel#titleBarTitle {{
+        background: transparent;
+        border: none;
+        color: {COLORS["text_main"]};
+        font-size: 13px;
+        font-weight: 600;
+        margin-left: 6px;
+    }}
+"""
+
+STYLE_TITLE_BAR_BUTTONS = f"""
+    QPushButton#titleBarBtn {{
+        background-color: {TITLE_BAR_BG};
+        border: none;
+        border-left: 1px solid {COLORS["border"]};
+        margin: 0px;
+        padding: 0px;
+        min-width: 46px;
+        max-width: 46px;
+    }}
+    QPushButton#titleBarBtn:hover {{
+        background-color: {COLORS["bg_gray"]};
+    }}
+    QPushButton#titleBarClose {{
+        background-color: {TITLE_BAR_BG};
+        border: none;
+        border-left: 1px solid {COLORS["border"]};
+        margin: 0px;
+        padding: 0px;
+        min-width: 46px;
+        max-width: 46px;
+    }}
+    QPushButton#titleBarClose:hover {{
+        background-color: {COLORS["danger"]};
     }}
 """
 

@@ -1,11 +1,20 @@
-from PyQt6.QtGui import QIcon, QAction
-from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QSystemTrayIcon, QWidget, QMenu, QApplication
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtWidgets import (
+    QHBoxLayout,
+    QMainWindow,
+    QMenu,
+    QApplication,
+    QSizeGrip,
+    QSystemTrayIcon,
+    QVBoxLayout,
+    QWidget,
+)
 
-
-from app.config import APP_LOGO_PATH
+from app.config import APP_LOGO_PATH, RESIZE_MARGIN
 from app.resources.strings import Strings
 from app.services.task_service import TaskService
+from app.ui.components.title_bar import TitleBar
 from app.ui.views.matrix import MatrixView
 from app.ui.views.sidebar import SidebarView
 
@@ -13,11 +22,11 @@ from app.ui.views.sidebar import SidebarView
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(Strings.get("我的任务"))
+        self.setWindowTitle(Strings.get("window_main_title"))
         self.setWindowIcon(QIcon(APP_LOGO_PATH))
         self.resize(1100, 750)
 
-        self.setWindowFlag(self.windowFlags() | Qt.WindowType.Tool)
+        self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
 
         self.service = TaskService()
         self.setup_tray()
@@ -52,15 +61,29 @@ class MainWindow(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
 
-        layout = QHBoxLayout(main_widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        outer_layout = QVBoxLayout(main_widget)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        self.title_bar = TitleBar(self)
+        outer_layout.addWidget(self.title_bar)
+
+        content_layout = QHBoxLayout()
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
 
         self.sidebar = SidebarView(self.service)
         self.matrix = MatrixView(self.service)
 
-        layout.addWidget(self.sidebar)
-        layout.addWidget(self.matrix, 1)
+        content_layout.addWidget(self.sidebar)
+        content_layout.addWidget(self.matrix, 1)
+
+        outer_layout.addLayout(content_layout, 1)
+
+        # Bottom-right resize grip for frameless window
+        self.size_grip = QSizeGrip(self)
+        self.size_grip.setFixedSize(RESIZE_MARGIN + 4, RESIZE_MARGIN + 4)
+        self.size_grip.setStyleSheet("background: transparent;")
 
     def refresh_all_views(self) -> None:
         self.sidebar.refresh()
@@ -81,9 +104,12 @@ class MainWindow(QMainWindow):
             self.show_window()
 
     def show_window(self):
-        self.showNormal()  # 从最小化/隐藏恢复
-        self.raise_()  # 提到最前
-        self.activateWindow()  # 获取焦点
+        if self.isMaximized():
+            self.showMaximized()
+        else:
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
 
     def closeEvent(self, event):
         super().closeEvent(event)

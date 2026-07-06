@@ -214,7 +214,9 @@ class TaskInfoPopup(QWidget):
 
 
 class TaskCardWidget(QWidget):
-    def __init__(self, task: Task, on_status_change=None, on_tag_double_clicked=None, archived=False):
+    def __init__(
+        self, task: Task, on_status_change=None, on_tag_double_clicked=None, archived=False
+    ):
         super().__init__()
         self.task = task
         self.popup = None
