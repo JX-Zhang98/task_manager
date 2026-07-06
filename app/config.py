@@ -153,7 +153,6 @@ STYLE_TITLE_BAR = f"""
     QLabel#titleBarIcon {{
         background: transparent;
         border: none;
-        margin-left: 10px;
     }}
     QLabel#titleBarTitle {{
         background: transparent;
@@ -161,7 +160,6 @@ STYLE_TITLE_BAR = f"""
         color: {COLORS["text_main"]};
         font-size: 13px;
         font-weight: 600;
-        margin-left: 6px;
     }}
 """
 

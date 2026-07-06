@@ -29,21 +29,20 @@ class TitleBar(QWidget):
         self.setStyleSheet(STYLE_TITLE_BAR + STYLE_TITLE_BAR_BUTTONS)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setContentsMargins(10, 0, 0, 0)
+        layout.setSpacing(6)
 
         # -- Left: icon + title --
         icon_label = QLabel()
         icon_label.setObjectName("titleBarIcon")
         pixmap = QPixmap(APP_LOGO_PATH)
         scaled = pixmap.scaled(
-            16,
-            16,
+            20,
+            20,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
         icon_label.setPixmap(scaled)
-        icon_label.setFixedSize(16, 16)
         layout.addWidget(icon_label)
 
         title_label = QLabel(Strings.get("window_main_title"))
