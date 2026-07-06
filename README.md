@@ -5,7 +5,7 @@
 ## 功能
 
 - 收件箱与四象限视图
-- 任务自动排序：未完成任务优先，再按截止时间排序
+- 任务自动排序：未完成任务优先，再按手动位置（sort_order）排序，截止时间仅作为同位置任务的次级排序
 - 拖拽任务到不同象限
 - 任务标题、描述、截止时间、具体时间和提醒
 - 完成状态复选框，已完成任务当天仍显示，历史完成任务进入归档
@@ -76,9 +76,20 @@ python -m app.cli check-reminders --now 2026-06-09T09:15:00
 python -m app.cli tags
 python -m app.cli add "处理合同" --tag Work --tag Legal
 python -m app.cli list --tag Legal
+python -m app.cli tag-rename "Work" "Deep Work" --color "#7C3AED" --confirm
+python -m app.cli tag-delete "OldTag" --confirm
+python -m app.cli tag-merge "SourceTag" "TargetTag" --confirm
+python -m app.cli tag-prune --cutoff-days 90 --confirm
 ```
 
 `tags` 会列出所有标签及引用任务数量；`add --tag` 可重复使用，已有标签会复用原颜色，新标签会自动分配颜色。
+
+标签管理命令（tag-rename、tag-delete、tag-merge、tag-prune）属于破坏性操作，必须使用 `--confirm` 确认或 `--dry-run` 预演：
+
+```bash
+python -m app.cli tag-delete "OldTag" --dry-run
+python -m app.cli tag-prune --dry-run
+```
 
 安全预演：
 

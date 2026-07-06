@@ -226,7 +226,9 @@ class TagManagerDialog(QDialog):
 
     def merge_tag(self, tag: dict[str, str]) -> None:
         candidates = [
-            item for item in self.service.get_all_tags() if item["name"].casefold() != tag["name"].casefold()
+            item
+            for item in self.service.get_all_tags()
+            if item["name"].casefold() != tag["name"].casefold()
         ]
         if not candidates:
             QMessageBox.information(self, "合并标签", "没有可合并的目标标签。")

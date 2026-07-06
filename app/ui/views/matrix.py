@@ -131,11 +131,7 @@ class MatrixView(QWidget):
         if not self.active_tag_filter:
             return tasks
         key = self.active_tag_filter.casefold()
-        return [
-            task
-            for task in tasks
-            if any(tag["name"].casefold() == key for tag in task.tags)
-        ]
+        return [task for task in tasks if any(tag["name"].casefold() == key for tag in task.tags)]
 
     def filter_by_tag(self, tag_name: str) -> None:
         if self.active_tag_filter == tag_name:
@@ -157,4 +153,4 @@ class MatrixView(QWidget):
     def _header_tag_text(self, tag_name: str) -> str:
         if len(tag_name) <= self.HEADER_TAG_MAX_LENGTH:
             return tag_name
-        return f"{tag_name[:self.HEADER_TAG_MAX_LENGTH]}..."
+        return f"{tag_name[: self.HEADER_TAG_MAX_LENGTH]}..."

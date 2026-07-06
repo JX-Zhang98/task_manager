@@ -69,24 +69,6 @@ class Task:
 
     @staticmethod
     def _normalize_tags(value: Any) -> list[dict[str, str]]:
-        if not isinstance(value, list):
-            return []
+        from app.domain.task_rules import normalize_tags
 
-        normalized = []
-        seen = set()
-        for item in value:
-            if isinstance(item, str):
-                name = item.strip()
-                color = "#6B7280"
-            elif isinstance(item, dict):
-                name = str(item.get("name", "")).strip()
-                color = str(item.get("color", "#6B7280")).strip() or "#6B7280"
-            else:
-                continue
-
-            key = name.casefold()
-            if not name or key in seen:
-                continue
-            seen.add(key)
-            normalized.append({"name": name, "color": color})
-        return normalized
+        return normalize_tags(value)

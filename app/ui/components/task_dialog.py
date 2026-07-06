@@ -17,7 +17,6 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QSpinBox,
-    QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -36,6 +35,7 @@ from app.config import (
     STYLE_TIME_PICKER,
     TAG_COLORS,
 )
+from app.ui.components.markdown_text_edit import MarkdownTextEdit
 from app.models.task import Task
 from app.resources.strings import Strings
 
@@ -143,7 +143,11 @@ class ClickableDateTimeEdit(QDateTimeEdit):
         super().mousePressEvent(event)
 
     def keyPressEvent(self, event) -> None:
-        if self.isEnabled() and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+        if self.isEnabled() and event.key() in (
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Space,
+        ):
             self.parent_dialog.open_date_time_picker()
             event.accept()
             return
@@ -288,7 +292,9 @@ class DateTimePickerPopup(QWidget):
 
 
 class TaskDialog(QDialog):
-    def __init__(self, parent=None, task: Task = None, all_tags: list[dict[str, str]] | None = None):
+    def __init__(
+        self, parent=None, task: Task = None, all_tags: list[dict[str, str]] | None = None
+    ):
         super().__init__(parent)
         self.task = task
         self.all_tags = self._normalize_tags(all_tags or [])
@@ -327,11 +333,31 @@ class TaskDialog(QDialog):
         self.title_edit.setStyleSheet(STYLE_INPUT)
         layout.addWidget(self.title_edit)
 
+        desc_header = QHBoxLayout()
+        desc_header.setContentsMargins(0, 0, 0, 0)
+        desc_header.setSpacing(6)
+
         lbl_desc = QLabel(Strings.get("label_desc"))
         lbl_desc.setStyleSheet(STYLE_FORM_LABEL)
-        layout.addWidget(lbl_desc)
+        desc_header.addWidget(lbl_desc)
 
-        self.desc_edit = QTextEdit()
+        self.btn_toggle_source = QPushButton("🔁")
+        self.btn_toggle_source.setFixedSize(24, 24)
+        self.btn_toggle_source.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_toggle_source.setToolTip("切换渲染/源码模式 (Ctrl+/)")
+        self.btn_toggle_source.setStyleSheet(
+            f"QPushButton {{ border: 1px solid {STYLE_INPUT}; "
+            f"border-radius: 4px; font-size: 14px; "
+            f"color: #6B7280; background: transparent; }} "
+            f"QPushButton:hover {{ background-color: #F3F4F6; }}"
+        )
+        self.btn_toggle_source.clicked.connect(self._toggle_desc_source_mode)
+        desc_header.addWidget(self.btn_toggle_source)
+
+        desc_header.addStretch()
+        layout.addLayout(desc_header)
+
+        self.desc_edit = MarkdownTextEdit()
         self.desc_edit.setPlaceholderText(Strings.get("placeholder_desc"))
         self.desc_edit.setStyleSheet(STYLE_INPUT)
         self.desc_edit.setFixedHeight(120)
@@ -445,7 +471,7 @@ class TaskDialog(QDialog):
             return
 
         self.title_edit.setText(self.task.title)
-        self.desc_edit.setPlainText(self.task.description)
+        self.desc_edit.set_description(self.task.description)
 
         has_due_date = bool(self.task.due_date)
         self.has_date_check.setChecked(has_due_date)
@@ -476,6 +502,9 @@ class TaskDialog(QDialog):
         self.reminder_combo.setEnabled(has_date)
         self.due_edit.setDisplayFormat("yyyy-MM-dd HH:mm" if has_time else "yyyy-MM-dd")
 
+    def _toggle_desc_source_mode(self) -> None:
+        self.desc_edit.toggle_source_mode()
+
     def save_task(self) -> None:
         title = self.title_edit.text().strip()
         if not title:
@@ -492,7 +521,7 @@ class TaskDialog(QDialog):
 
         self.result_data = {
             "title": title,
-            "description": self.desc_edit.toPlainText().strip(),
+            "description": self.desc_edit.markdown_source().strip(),
             "due_date": due_date,
             "has_time": has_time,
             "reminder_minutes": self.reminder_combo.currentData() if due_date else None,
@@ -536,9 +565,7 @@ class TaskDialog(QDialog):
         candidate_layout.setContentsMargins(10, 10, 10, 10)
         candidate_layout.setSpacing(8)
 
-        available = [
-            tag for tag in self.all_tags if not self._has_selected_tag(tag["name"])
-        ]
+        available = [tag for tag in self.all_tags if not self._has_selected_tag(tag["name"])]
         if available:
             available_widget = QWidget()
             available_layout = FlowLayout(available_widget, spacing=6)
@@ -614,19 +641,9 @@ class TaskDialog(QDialog):
         return TAG_COLORS[len(names) % len(TAG_COLORS)]
 
     def _normalize_tags(self, tags: list[dict[str, str]]) -> list[dict[str, str]]:
-        normalized = []
-        seen = set()
-        for tag in tags:
-            if not isinstance(tag, dict):
-                continue
-            name = str(tag.get("name", "")).strip()
-            color = str(tag.get("color", "#6B7280")).strip() or "#6B7280"
-            key = name.casefold()
-            if not name or key in seen:
-                continue
-            seen.add(key)
-            normalized.append({"name": name, "color": color})
-        return normalized
+        from app.domain.task_rules import normalize_tags
+
+        return normalize_tags(tags)
 
     def _make_tag_button(self, tag: dict[str, str], handler) -> QPushButton:
         display_name = self._tag_display_name(tag["name"])

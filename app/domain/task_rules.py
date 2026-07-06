@@ -99,3 +99,33 @@ def should_trigger_reminder(task: Task, now: Optional[datetime] = None) -> bool:
 
     trigger_at = due_at - timedelta(minutes=task.reminder_minutes)
     return (now or datetime.now()) >= trigger_at
+
+
+def normalize_tags(value: Optional[list] = None) -> list[dict[str, str]]:
+    """Canonical tag normalization — single source of truth for all layers.
+
+    Handles: null/empty → [], string items (legacy), dict items,
+    strip whitespace, default color, dedup by casefold key, sorted by name.
+    """
+    if not value or not isinstance(value, list):
+        return []
+
+    normalized: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in value:
+        if isinstance(item, str):
+            name = item.strip()
+            color = "#6B7280"
+        elif isinstance(item, dict):
+            name = str(item.get("name", "")).strip()
+            color = str(item.get("color", "#6B7280")).strip() or "#6B7280"
+        else:
+            continue
+
+        key = name.casefold()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        normalized.append({"name": name, "color": color})
+
+    return sorted(normalized, key=lambda tag: tag["name"].casefold())

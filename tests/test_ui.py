@@ -152,14 +152,18 @@ def test_tag_widgets_truncate_long_names_and_group_candidates(qapp):
     assert short_pill.toolTip() == ""
 
     card = TaskCardWidget(
-        task=type("TaskStub", (), {
-            "id": "1",
-            "title": "Tagged",
-            "completed": False,
-            "due_date": None,
-            "reminder_minutes": None,
-            "tags": [long_tag, short_tag],
-        })()
+        task=type(
+            "TaskStub",
+            (),
+            {
+                "id": "1",
+                "title": "Tagged",
+                "completed": False,
+                "due_date": None,
+                "reminder_minutes": None,
+                "tags": [long_tag, short_tag],
+            },
+        )()
     )
     assert card.findChild(DragScrollArea) is not None
 
@@ -170,23 +174,36 @@ def test_tag_widgets_truncate_long_names_and_group_candidates(qapp):
 def test_edit_dialog_shows_selected_and_candidate_tags(qapp):
     selected = {"name": "Work", "color": "#2563EB"}
     candidate = {"name": "Home", "color": "#059669"}
-    task = type("TaskStub", (), {
-        "id": "1",
-        "title": "Tagged",
-        "description": "",
-        "due_date": None,
-        "has_time": False,
-        "reminder_minutes": None,
-        "tags": [selected],
-    })()
+    task = type(
+        "TaskStub",
+        (),
+        {
+            "id": "1",
+            "title": "Tagged",
+            "description": "",
+            "due_date": None,
+            "has_time": False,
+            "reminder_minutes": None,
+            "tags": [selected],
+        },
+    )()
     dialog = TaskDialog(task=task, all_tags=[selected, candidate])
 
-    assert any(button.text() == "Work" and button.isVisibleTo(dialog) for button in dialog.findChildren(QPushButton))
-    assert not any(button.text() == "Home" and button.isVisibleTo(dialog) for button in dialog.findChildren(QPushButton))
+    assert any(
+        button.text() == "Work" and button.isVisibleTo(dialog)
+        for button in dialog.findChildren(QPushButton)
+    )
+    assert not any(
+        button.text() == "Home" and button.isVisibleTo(dialog)
+        for button in dialog.findChildren(QPushButton)
+    )
 
     dialog.toggle_tag_picker()
 
-    assert any(button.text() == "Home" and button.isVisibleTo(dialog) for button in dialog.findChildren(QPushButton))
+    assert any(
+        button.text() == "Home" and button.isVisibleTo(dialog)
+        for button in dialog.findChildren(QPushButton)
+    )
     assert dialog.tag_container.sizeHint().height() > 0
 
     dialog.close()

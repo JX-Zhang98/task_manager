@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 
 from app.config import (
     COLORS,
+    QUADRANT_CONFIGS,
     STYLE_CARD_CONTAINER,
     STYLE_CARD_META,
     STYLE_CARD_TITLE,
@@ -25,6 +26,7 @@ from app.config import (
 )
 from app.models.task import Task
 from app.resources.strings import Strings
+from app.ui.components.markdown_text_edit import MarkdownTextEdit
 
 
 class TagPill(QLabel):
@@ -158,39 +160,69 @@ class TaskInfoPopup(QWidget):
 
         v_layout = QVBoxLayout(container)
         v_layout.setContentsMargins(15, 12, 15, 12)
-        v_layout.setSpacing(8)
+        v_layout.setSpacing(4)
 
-        lbl_title = QLabel(task.title)
-        lbl_title.setWordWrap(True)
-        lbl_title.setStyleSheet(
-            "font-size: 14px; font-weight: 700; border: none; background: transparent;"
-        )
-        v_layout.addWidget(lbl_title)
-
+        # Title is already visible on the card — only show description
+        # in the popup, up to 10 lines of content (≈200 px at 13px font).
         if task.description and task.description.strip():
-            line = QFrame()
-            line.setFrameShape(QFrame.Shape.HLine)
-            line.setStyleSheet("background-color: #E5E7EB; max-height: 1px; border: none;")
-            v_layout.addWidget(line)
-
-            lbl_desc = QLabel(task.description)
-            lbl_desc.setWordWrap(True)
-            lbl_desc.setStyleSheet(
-                "font-size: 13px; color: #4B5563; border: none; background: transparent;"
+            # Use a read-only MarkdownTextEdit to render Markdown descriptions.
+            # Reusing MarkdownTextEdit gives us loadResource override for
+            # proper image resolution and baseUrl handling.
+            popup_content_width = 250  # 300 - 10*2 (outer) - 15*2 (container)
+            desc_view = MarkdownTextEdit()
+            desc_view.setReadOnly(True)
+            desc_view.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            desc_view.setFrameShape(QFrame.Shape.NoFrame)
+            desc_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            desc_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            desc_view.setStyleSheet(
+                "font-size: 13px; color: #4B5563; background: transparent; padding: 0px; margin: 0px;"
             )
-            v_layout.addWidget(lbl_desc)
+
+            # Force the document to lay out at the popup's content width
+            # so that document().size().height() returns a correct value.
+            # (Before the widget is shown, the viewport width is 0, so
+            # QTextDocument cannot calculate line wrapping and returns
+            # height ≈ 0.  When the popup is later shown, QTextEdit's
+            # resizeEvent will override this with the actual viewport width.)
+            desc_view.document().setTextWidth(popup_content_width)
+            desc_view.set_description(task.description)
+
+            # Scale images to 90 % of the popup content width.
+            desc_view._scale_images_to_width(int(popup_content_width * 0.9))
+
+            # Limit to approximately 10 lines of content (≈200 px).
+            doc_height = desc_view.document().size().height()
+            max_height = 200
+
+            if doc_height <= max_height:
+                desc_view.setFixedHeight(int(doc_height) + 4)
+                v_layout.addWidget(desc_view)
+            else:
+                desc_view.setFixedHeight(max_height)
+                v_layout.addWidget(desc_view)
+
+                # Add a visible truncation indicator below the clipped view.
+                ellipsis = QLabel("…")
+                ellipsis.setStyleSheet(
+                    "font-size: 12px; color: #9CA3AF; border: none; background: transparent;"
+                )
+                v_layout.addWidget(ellipsis)
 
         main_layout.addWidget(container)
         self.setFixedWidth(300)
 
 
 class TaskCardWidget(QWidget):
-    def __init__(self, task: Task, on_status_change=None, on_tag_double_clicked=None):
+    def __init__(
+        self, task: Task, on_status_change=None, on_tag_double_clicked=None, archived=False
+    ):
         super().__init__()
         self.task = task
         self.popup = None
         self.on_status_change = on_status_change
         self.on_tag_double_clicked = on_tag_double_clicked
+        self.archived = archived
         self.has_tags = bool(task.tags)
         self.has_bottom_info = bool(task.due_date or task.reminder_minutes is not None)
         self.shadow_margin = 4
@@ -203,20 +235,22 @@ class TaskCardWidget(QWidget):
         self.setStyleSheet(STYLE_CARD_CONTAINER)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(self.shadow_margin, self.shadow_margin, self.shadow_margin, self.shadow_margin)
+        layout.setContentsMargins(
+            self.shadow_margin, self.shadow_margin, self.shadow_margin, self.shadow_margin
+        )
         layout.setSpacing(0)
 
-        surface = QFrame()
-        surface.setObjectName("taskCardSurface")
-        surface.setStyleSheet(STYLE_CARD_CONTAINER)
+        self.surface = QFrame()
+        self.surface.setObjectName("taskCardSurface")
+        self.surface.setStyleSheet(STYLE_CARD_CONTAINER)
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(12)
         shadow.setColor(QColor(17, 24, 39, 24))
         shadow.setOffset(0, 3)
-        surface.setGraphicsEffect(shadow)
-        layout.addWidget(surface)
+        self.surface.setGraphicsEffect(shadow)
+        layout.addWidget(self.surface)
 
-        content_layout = QVBoxLayout(surface)
+        content_layout = QVBoxLayout(self.surface)
         content_layout.setContentsMargins(12, 12, 12, 12)
         content_layout.setSpacing(self.spacing)
 
@@ -322,6 +356,35 @@ class TaskCardWidget(QWidget):
 
     def update_visual_style(self, completed: bool) -> None:
         self.lbl_title.setStyleSheet(STYLE_COMPLETED_TEXT if completed else STYLE_CARD_TITLE)
+        # Only apply quadrant background color for archived cards (归档箱).
+        # Cards that are still in the quadrant should keep the default white
+        # style even when completed — they will be moved to archive soon.
+        if completed and self.archived:
+            quadrant_bg = self._quadrant_bg_color()
+            if quadrant_bg:
+                self.setStyleSheet("TaskCardWidget { background: transparent; }")
+                self.surface.setStyleSheet(
+                    f"QFrame#taskCardSurface {{ "
+                    f"background-color: {quadrant_bg}; "
+                    f"border-radius: 12px; "
+                    f"border: 1px solid {COLORS['border']}; }}"
+                    f"QFrame#taskCardSurface:hover {{ "
+                    f"border: 1px solid {COLORS['border_hover']}; }}"
+                )
+            else:
+                self.setStyleSheet(STYLE_CARD_CONTAINER)
+                self.surface.setStyleSheet(STYLE_CARD_CONTAINER)
+        else:
+            self.setStyleSheet(STYLE_CARD_CONTAINER)
+            self.surface.setStyleSheet(STYLE_CARD_CONTAINER)
+
+    def _quadrant_bg_color(self) -> str | None:
+        """Return the quadrant's light background color for the current task."""
+        qid = self.task.quadrant
+        for conf in QUADRANT_CONFIGS:
+            if conf["id"] == qid:
+                return conf["bg"]
+        return None
 
     def update_preferred_height(self, target_width: int) -> int:
         target_width = max(120, target_width)
