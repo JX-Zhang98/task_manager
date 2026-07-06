@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 
 from app.config import (
     COLORS,
+    QUADRANT_CONFIGS,
     STYLE_CARD_CONTAINER,
     STYLE_CARD_META,
     STYLE_CARD_TITLE,
@@ -236,17 +237,17 @@ class TaskCardWidget(QWidget):
         )
         layout.setSpacing(0)
 
-        surface = QFrame()
-        surface.setObjectName("taskCardSurface")
-        surface.setStyleSheet(STYLE_CARD_CONTAINER)
+        self.surface = QFrame()
+        self.surface.setObjectName("taskCardSurface")
+        self.surface.setStyleSheet(STYLE_CARD_CONTAINER)
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(12)
         shadow.setColor(QColor(17, 24, 39, 24))
         shadow.setOffset(0, 3)
-        surface.setGraphicsEffect(shadow)
-        layout.addWidget(surface)
+        self.surface.setGraphicsEffect(shadow)
+        layout.addWidget(self.surface)
 
-        content_layout = QVBoxLayout(surface)
+        content_layout = QVBoxLayout(self.surface)
         content_layout.setContentsMargins(12, 12, 12, 12)
         content_layout.setSpacing(self.spacing)
 
@@ -352,6 +353,38 @@ class TaskCardWidget(QWidget):
 
     def update_visual_style(self, completed: bool) -> None:
         self.lbl_title.setStyleSheet(STYLE_COMPLETED_TEXT if completed else STYLE_CARD_TITLE)
+        # For completed tasks, change the card background to the quadrant's
+        # light background color so archived tasks are visually grouped by
+        # their original quadrant.
+        # Must update self.surface's own local stylesheet — Qt gives local
+        # styles higher priority than parent-level selectors, so the surface's
+        # STYLE_CARD_CONTAINER (white bg) would override any parent rules.
+        if completed:
+            quadrant_bg = self._quadrant_bg_color()
+            if quadrant_bg:
+                self.setStyleSheet("TaskCardWidget { background: transparent; }")
+                self.surface.setStyleSheet(
+                    f"QFrame#taskCardSurface {{ "
+                    f"background-color: {quadrant_bg}; "
+                    f"border-radius: 12px; "
+                    f"border: 1px solid {COLORS['border']}; }}"
+                    f"QFrame#taskCardSurface:hover {{ "
+                    f"border: 1px solid {COLORS['border_hover']}; }}"
+                )
+            else:
+                self.setStyleSheet(STYLE_CARD_CONTAINER)
+                self.surface.setStyleSheet(STYLE_CARD_CONTAINER)
+        else:
+            self.setStyleSheet(STYLE_CARD_CONTAINER)
+            self.surface.setStyleSheet(STYLE_CARD_CONTAINER)
+
+    def _quadrant_bg_color(self) -> str | None:
+        """Return the quadrant's light background color for the current task."""
+        qid = self.task.quadrant
+        for conf in QUADRANT_CONFIGS:
+            if conf["id"] == qid:
+                return conf["bg"]
+        return None
 
     def update_preferred_height(self, target_width: int) -> int:
         target_width = max(120, target_width)
