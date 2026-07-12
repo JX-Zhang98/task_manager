@@ -64,6 +64,19 @@ def test_tag_manager_dialog_lists_tags_and_sidebar_has_entry(tmp_path, qapp):
     dialog.close()
 
 
+def test_sidebar_inbox_list_uses_remaining_height(tmp_path, qapp):
+    service = make_service(tmp_path)
+    sidebar = SidebarView(service)
+    sidebar.resize(300, 750)
+    sidebar.show()
+    qapp.processEvents()
+
+    assert sidebar.layout().stretch(sidebar.layout().indexOf(sidebar.inbox_list)) == 1
+    assert sidebar.inbox_list.height() > 400
+
+    sidebar.close()
+
+
 def test_matrix_filters_by_double_clicked_tag(tmp_path, qapp):
     service = make_service(tmp_path)
     work = {"name": "Work", "color": "#2563EB"}
