@@ -61,9 +61,7 @@ class SidebarView(QWidget):
         self.inbox_list.itemDoubleClicked.connect(self.handle_double_click)
         self.inbox_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.inbox_list.customContextMenuRequested.connect(self.show_context_menu)
-        layout.addWidget(self.inbox_list)
-
-        layout.addStretch()
+        layout.addWidget(self.inbox_list, 1)
 
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)

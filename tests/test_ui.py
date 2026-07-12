@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import QFrame, QPushButton
 from app.services.task_service import TaskService
 from app.ui.components.task_card import DragScrollArea, TagPill, TaskCardWidget
 from app.ui.components.task_dialog import DateTimePickerPopup, TaskDialog
+from app.ui.main_window import MainWindow, SystemResizeHandle
 from app.ui.views.archive_dialog import ArchiveDialog
 from app.ui.views.matrix import MatrixView
 from app.ui.views.sidebar import SidebarView
@@ -62,6 +63,47 @@ def test_tag_manager_dialog_lists_tags_and_sidebar_has_entry(tmp_path, qapp):
 
     sidebar.close()
     dialog.close()
+
+
+def test_sidebar_inbox_list_uses_remaining_height(tmp_path, qapp):
+    service = make_service(tmp_path)
+    sidebar = SidebarView(service)
+    sidebar.resize(300, 750)
+    sidebar.show()
+    qapp.processEvents()
+
+    assert sidebar.layout().stretch(sidebar.layout().indexOf(sidebar.inbox_list)) == 1
+    assert sidebar.inbox_list.height() > 400
+
+    sidebar.close()
+
+
+def test_size_grip_stays_in_bottom_right(qapp):
+    window = MainWindow()
+    window.show()
+    window.resize(1100, 750)
+    qapp.processEvents()
+
+    assert window.size_grip.x() == window.width() - window.size_grip.width()
+    assert window.size_grip.y() == window.height() - window.size_grip.height()
+
+    window.resize(900, 640)
+    qapp.processEvents()
+
+    assert window.size_grip.x() == window.width() - window.size_grip.width()
+    assert window.size_grip.y() == window.height() - window.size_grip.height()
+
+    window.close()
+
+
+def test_frameless_window_has_system_resize_handles(qapp):
+    window = MainWindow()
+
+    handles = window.findChildren(SystemResizeHandle)
+    assert len(handles) == 8
+    assert all(handle.cursor().shape() for handle in handles)
+
+    window.close()
 
 
 def test_matrix_filters_by_double_clicked_tag(tmp_path, qapp):
