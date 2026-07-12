@@ -84,6 +84,18 @@ class MainWindow(QMainWindow):
         self.size_grip = QSizeGrip(self)
         self.size_grip.setFixedSize(RESIZE_MARGIN + 4, RESIZE_MARGIN + 4)
         self.size_grip.setStyleSheet("background: transparent;")
+        self._position_size_grip()
+
+    def _position_size_grip(self) -> None:
+        if hasattr(self, "size_grip"):
+            self.size_grip.move(
+                self.width() - self.size_grip.width(),
+                self.height() - self.size_grip.height(),
+            )
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._position_size_grip()
 
     def refresh_all_views(self) -> None:
         self.sidebar.refresh()
