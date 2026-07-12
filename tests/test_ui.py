@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import QFrame, QPushButton
 from app.services.task_service import TaskService
 from app.ui.components.task_card import DragScrollArea, TagPill, TaskCardWidget
 from app.ui.components.task_dialog import DateTimePickerPopup, TaskDialog
-from app.ui.main_window import MainWindow
+from app.ui.main_window import MainWindow, SystemResizeHandle
 from app.ui.views.archive_dialog import ArchiveDialog
 from app.ui.views.matrix import MatrixView
 from app.ui.views.sidebar import SidebarView
@@ -92,6 +92,16 @@ def test_size_grip_stays_in_bottom_right(qapp):
 
     assert window.size_grip.x() == window.width() - window.size_grip.width()
     assert window.size_grip.y() == window.height() - window.size_grip.height()
+
+    window.close()
+
+
+def test_frameless_window_has_system_resize_handles(qapp):
+    window = MainWindow()
+
+    handles = window.findChildren(SystemResizeHandle)
+    assert len(handles) == 8
+    assert all(handle.cursor().shape() for handle in handles)
 
     window.close()
 

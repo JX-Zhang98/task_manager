@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import (
+    QGridLayout,
     QHBoxLayout,
     QMainWindow,
     QMenu,
@@ -17,6 +20,25 @@ from app.services.task_service import TaskService
 from app.ui.components.title_bar import TitleBar
 from app.ui.views.matrix import MatrixView
 from app.ui.views.sidebar import SidebarView
+
+
+class SystemResizeHandle(QWidget):
+    def __init__(self, window: "MainWindow", edges: Qt.Edge, cursor: Qt.CursorShape):
+        super().__init__(window)
+        self.window_ref = window
+        self.edges = edges
+        self.setCursor(cursor)
+        self.setStyleSheet("background: transparent;")
+
+    def mousePressEvent(self, event) -> None:
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and not self.window_ref.isMaximized()
+            and self.window_ref.start_system_resize(self.edges)
+        ):
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -61,7 +83,78 @@ class MainWindow(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
 
-        outer_layout = QVBoxLayout(main_widget)
+        frame_layout = QGridLayout(main_widget)
+        frame_layout.setContentsMargins(0, 0, 0, 0)
+        frame_layout.setSpacing(0)
+
+        content_widget = QWidget()
+        frame_layout.addWidget(
+            self._resize_handle(
+                Qt.Edge.TopEdge | Qt.Edge.LeftEdge,
+                Qt.CursorShape.SizeFDiagCursor,
+                RESIZE_MARGIN,
+                RESIZE_MARGIN,
+            ),
+            0,
+            0,
+        )
+        frame_layout.addWidget(
+            self._resize_handle(Qt.Edge.TopEdge, Qt.CursorShape.SizeVerCursor, None, RESIZE_MARGIN),
+            0,
+            1,
+        )
+        frame_layout.addWidget(
+            self._resize_handle(
+                Qt.Edge.TopEdge | Qt.Edge.RightEdge,
+                Qt.CursorShape.SizeBDiagCursor,
+                RESIZE_MARGIN,
+                RESIZE_MARGIN,
+            ),
+            0,
+            2,
+        )
+        frame_layout.addWidget(
+            self._resize_handle(Qt.Edge.LeftEdge, Qt.CursorShape.SizeHorCursor, RESIZE_MARGIN),
+            1,
+            0,
+        )
+        frame_layout.addWidget(content_widget, 1, 1)
+        frame_layout.addWidget(
+            self._resize_handle(Qt.Edge.RightEdge, Qt.CursorShape.SizeHorCursor, RESIZE_MARGIN),
+            1,
+            2,
+        )
+        frame_layout.addWidget(
+            self._resize_handle(
+                Qt.Edge.BottomEdge | Qt.Edge.LeftEdge,
+                Qt.CursorShape.SizeBDiagCursor,
+                RESIZE_MARGIN,
+                RESIZE_MARGIN,
+            ),
+            2,
+            0,
+        )
+        frame_layout.addWidget(
+            self._resize_handle(
+                Qt.Edge.BottomEdge, Qt.CursorShape.SizeVerCursor, None, RESIZE_MARGIN
+            ),
+            2,
+            1,
+        )
+        frame_layout.addWidget(
+            self._resize_handle(
+                Qt.Edge.BottomEdge | Qt.Edge.RightEdge,
+                Qt.CursorShape.SizeFDiagCursor,
+                RESIZE_MARGIN,
+                RESIZE_MARGIN,
+            ),
+            2,
+            2,
+        )
+        frame_layout.setColumnStretch(1, 1)
+        frame_layout.setRowStretch(1, 1)
+
+        outer_layout = QVBoxLayout(content_widget)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
 
@@ -85,6 +178,26 @@ class MainWindow(QMainWindow):
         self.size_grip.setFixedSize(RESIZE_MARGIN + 4, RESIZE_MARGIN + 4)
         self.size_grip.setStyleSheet("background: transparent;")
         self._position_size_grip()
+
+    def _resize_handle(
+        self,
+        edges: Qt.Edge,
+        cursor: Qt.CursorShape,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> SystemResizeHandle:
+        handle = SystemResizeHandle(self, edges, cursor)
+        if width is not None:
+            handle.setFixedWidth(width)
+        if height is not None:
+            handle.setFixedHeight(height)
+        return handle
+
+    def start_system_resize(self, edges: Qt.Edge) -> bool:
+        window_handle = self.windowHandle()
+        if window_handle is None:
+            return False
+        return window_handle.startSystemResize(edges)
 
     def _position_size_grip(self) -> None:
         if hasattr(self, "size_grip"):
